@@ -1,0 +1,2931 @@
+<!doctype html>
+<!--
+  dashboard.html – Privacy Campus Security · Flask Dashboard
+  ──────────────────────────────────────────────────────────
+  Stack: Bootstrap 5.3, Bootstrap Icons 1.11, Chart.js 4, Google Fonts (Inter)
+  Theme: dark / slate, professional security-product palette
+
+  Extension points (search for the tag to jump to the location):
+    [MQTT]   – swap polling for WebSocket / socket.io event listener
+    [REACT]  – entry point comment if replacing this page with a React SPA
+    [PLUGIN] – add new dashboard cards or metrics sections here
+-->
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="description" content="Privacy-Preserving Campus Security Dashboard"/>
+  <title>PCS · Dashboard</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+
+  <!-- Bootstrap 5 -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+        crossorigin="anonymous"/>
+  <!-- Bootstrap Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+
+  <!-- ──────────────────────────────────────────────────────────────────────
+       Custom CSS
+       All rules use CSS custom properties so the palette can be reskinned
+       by changing just the :root block.
+       ────────────────────────────────────────────────────────────────────── -->
+  <style>
+    /* ── Design tokens ───────────────────────────────────────────────────── */
+    :root {
+      --pcs-bg:         #080f1a;
+      --pcs-surface:    #0f1d2e;
+      --pcs-surface-2:  #162233;
+      --pcs-border:     #1e3048;
+      --pcs-accent:     #0ea5e9;      /* sky-500 */
+      --pcs-accent-dim: #0284c7;
+      --pcs-green:      #22c55e;
+      --pcs-amber:      #f59e0b;
+      --pcs-red:        #ef4444;
+      --pcs-muted:      #64748b;
+      --pcs-text:       #e2e8f0;
+      --pcs-text-dim:   #94a3b8;
+      --pcs-font:       'Inter', system-ui, sans-serif;
+      --pcs-mono:       'JetBrains Mono', 'Cascadia Code', monospace;
+      --pcs-radius:     12px;
+      --pcs-radius-sm:  8px;
+      --pcs-shadow:     0 4px 24px rgba(0,0,0,.45);
+      --pcs-glow:       0 0 0 3px rgba(14,165,233,.25);
+    }
+
+    /* ── Base ─────────────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      font-family: var(--pcs-font);
+      background: var(--pcs-bg);
+      color: var(--pcs-text);
+      font-size: 0.9375rem;
+      line-height: 1.6;
+      margin: 0;
+    }
+
+    /* ── Topbar ───────────────────────────────────────────────────────────── */
+    .pcs-topbar {
+      position: sticky; top: 0; z-index: 1030;
+      background: var(--pcs-surface);
+      border-bottom: 1px solid var(--pcs-border);
+      padding: .75rem 1.5rem;
+      display: flex; align-items: center; gap: 1rem;
+      backdrop-filter: blur(10px);
+    }
+    .pcs-topbar .brand { font-weight: 700; font-size: 1rem; letter-spacing: .03em; color: var(--pcs-text); text-decoration: none; display: flex; align-items: center; gap: .5rem; }
+    .pcs-topbar .brand i { color: var(--pcs-accent); font-size: 1.3rem; }
+    .pcs-topbar .pill { background: var(--pcs-accent); color: #fff; font-size: .65rem; font-weight: 700; padding: .15rem .55rem; border-radius: 999px; letter-spacing: .06em; text-transform: uppercase; }
+    .pcs-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pcs-green); margin-left: auto; box-shadow: 0 0 8px var(--pcs-green); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .pcs-topbar .uptime { font-size: .75rem; color: var(--pcs-muted); font-family: var(--pcs-mono); }
+
+    /* ── Layout ───────────────────────────────────────────────────────────── */
+    .pcs-wrapper { max-width: 1400px; margin: 0 auto; padding: 1.75rem 1.25rem 3rem; }
+
+    /* ── Section labels ───────────────────────────────────────────────────── */
+    .section-label {
+      font-size: .7rem; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--pcs-muted);
+      margin-bottom: .75rem; display: flex; align-items: center; gap: .4rem;
+    }
+    .section-label::after { content:''; flex:1; height:1px; background: var(--pcs-border); }
+
+    /* ── Cards ────────────────────────────────────────────────────────────── */
+    .pcs-card {
+      background: var(--pcs-surface);
+      border: 1px solid var(--pcs-border);
+      border-radius: var(--pcs-radius);
+      box-shadow: var(--pcs-shadow);
+      padding: 1.375rem 1.5rem;
+    }
+    .pcs-card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+    .pcs-card-title { font-weight: 600; font-size: .875rem; color: var(--pcs-text-dim); display: flex; align-items: center; gap: .4rem; }
+    .pcs-card-title i { color: var(--pcs-accent); font-size: 1rem; }
+
+    /* ── Summary / stat cards ─────────────────────────────────────────────── */
+    .stat-card {
+      background: var(--pcs-surface);
+      border: 1px solid var(--pcs-border);
+      border-radius: var(--pcs-radius);
+      padding: 1.25rem 1.5rem;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .stat-card:hover { border-color: var(--pcs-accent); box-shadow: var(--pcs-glow); }
+    .stat-label { font-size: .7rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--pcs-muted); margin-bottom: .35rem; }
+    .stat-value { font-size: 2.1rem; font-weight: 700; line-height: 1; color: var(--pcs-text); font-family: var(--pcs-mono); }
+    .stat-sub { font-size: .75rem; color: var(--pcs-muted); margin-top: .3rem; }
+    .stat-icon { font-size: 1.75rem; color: var(--pcs-accent); opacity: .3; }
+
+    /* ── Table ────────────────────────────────────────────────────────────── */
+    .pcs-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+    .pcs-table th { color: var(--pcs-muted); font-weight: 600; font-size: .7rem; letter-spacing: .07em; text-transform: uppercase; padding: .5rem .875rem; border-bottom: 1px solid var(--pcs-border); text-align: right; }
+    .pcs-table th:first-child { text-align: left; }
+    .pcs-table td { padding: .65rem .875rem; border-bottom: 1px solid rgba(30,48,72,.6); vertical-align: middle; text-align: right; }
+    .pcs-table td:first-child { text-align: left; }
+    .pcs-table tbody tr:last-child td { border-bottom: none; }
+    .pcs-table tbody tr:hover td { background: rgba(14,165,233,.05); }
+
+    /* Accuracy bar inside table */
+    .acc-bar { display: flex; align-items: center; gap: .5rem; justify-content: flex-end; }
+    .acc-track { width: 80px; height: 6px; background: var(--pcs-border); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
+    .acc-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--pcs-accent), var(--pcs-green)); transition: width .6s ease; }
+
+    /* ── Events feed ──────────────────────────────────────────────────────── */
+    #events-feed { max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: .4rem; }
+    #events-feed::-webkit-scrollbar { width: 4px; }
+    #events-feed::-webkit-scrollbar-track { background: transparent; }
+    #events-feed::-webkit-scrollbar-thumb { background: var(--pcs-border); border-radius: 2px; }
+    .event-row {
+      display: flex; align-items: flex-start; gap: .65rem;
+      padding: .55rem .75rem; border-radius: var(--pcs-radius-sm);
+      background: var(--pcs-surface-2);
+      border: 1px solid var(--pcs-border);
+      font-size: .8125rem; animation: fadeIn .25s ease;
+    }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:none} }
+    .event-icon { width: 26px; height: 26px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: .8rem; flex-shrink: 0; margin-top: .05rem; }
+    .event-icon.enroll  { background: rgba(14,165,233,.15); color: var(--pcs-accent); }
+    .event-icon.verify  { background: rgba(34,197,94,.15);  color: var(--pcs-green); }
+    .event-icon.anomaly { background: rgba(239,68,68,.15);  color: var(--pcs-red); }
+    .event-icon.alarm   { background: rgba(245,158,11,.15); color: var(--pcs-amber); }
+    .event-icon.system  { background: rgba(100,116,139,.15);color: var(--pcs-muted); }
+    .event-body { flex: 1; min-width: 0; }
+    .event-title { font-weight: 600; color: var(--pcs-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .event-meta  { color: var(--pcs-muted); font-size: .72rem; font-family: var(--pcs-mono); }
+    .event-ts    { font-size: .7rem; color: var(--pcs-muted); white-space: nowrap; flex-shrink: 0; font-family: var(--pcs-mono); }
+
+    /* ── Alerts panel ──────────────────────────────────────────────────────── */
+    .alert-severity-forced { background:#7f1d1d;color:#ef4444; }
+    .alert-severity-tailgate { background:#78350f;color:#f59e0b; }
+    .alert-severity-other { background:#1e3048;color:#94a3b8; }
+    .alert-sev-pill {
+      display:inline-block; padding:.15em .55em; border-radius:4px;
+      font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em;
+    }
+    .alert-cam-thumb {
+      width:72px; height:48px; object-fit:cover; border-radius:4px;
+      border:1px solid var(--pcs-border); background:var(--pcs-bg);
+      display:block;
+    }
+    .alert-cam-placeholder {
+      width:72px; height:48px; border-radius:4px;
+      border:1px solid var(--pcs-border); background:var(--pcs-bg);
+      display:flex; align-items:center; justify-content:center;
+      color:var(--pcs-muted); font-size:1.1rem;
+    }
+    .ack-audit { font-size:.72rem; color:var(--pcs-muted); line-height:1.4; }
+    /* toast container (fixed bottom-right) */
+    #alert-toast-container {
+      position:fixed; bottom:1.25rem; right:1.25rem;
+      z-index:1080; display:flex; flex-direction:column;
+      align-items:flex-end; gap:.5rem; pointer-events:none;
+    }
+    #alert-toast-container .toast { pointer-events:auto; }
+
+    /* ── Chart containers ─────────────────────────────────────────────────── */
+    .chart-wrap { position: relative; }
+
+    /* ── Form controls ────────────────────────────────────────────────────── */
+    .pcs-label { font-size: .78rem; font-weight: 500; color: var(--pcs-text-dim); margin-bottom: .3rem; display: block; }
+    .pcs-input {
+      width: 100%; padding: .55rem .875rem;
+      background: var(--pcs-bg); border: 1px solid var(--pcs-border);
+      border-radius: var(--pcs-radius-sm); color: var(--pcs-text);
+      font-size: .875rem; transition: border-color .15s, box-shadow .15s;
+      outline: none;
+    }
+    .pcs-input:focus { border-color: var(--pcs-accent); box-shadow: var(--pcs-glow); }
+    .pcs-btn {
+      display: inline-flex; align-items: center; gap: .4rem;
+      padding: .55rem 1.2rem; border: none; border-radius: var(--pcs-radius-sm);
+      font-size: .875rem; font-weight: 600; cursor: pointer;
+      transition: background .15s, transform .1s;
+    }
+    .pcs-btn:active { transform: scale(.97); }
+    .pcs-btn-primary  { background: var(--pcs-accent);     color: #fff; }
+    .pcs-btn-primary:hover  { background: var(--pcs-accent-dim); }
+    .pcs-btn-success  { background: rgba(34,197,94,.15);  color: var(--pcs-green); border: 1px solid rgba(34,197,94,.3); }
+    .pcs-btn-success:hover  { background: rgba(34,197,94,.25); }
+    .pcs-btn-sm { padding: .3rem .8rem; font-size: .78rem; }
+
+    /* ── Response box ─────────────────────────────────────────────────────── */
+    .pcs-response {
+      margin-top: .75rem; padding: .65rem .875rem;
+      background: var(--pcs-bg); border: 1px solid var(--pcs-border);
+      border-radius: var(--pcs-radius-sm); font-family: var(--pcs-mono);
+      font-size: .78rem; color: var(--pcs-green); white-space: pre-wrap;
+      display: none; max-height: 120px; overflow-y: auto;
+    }
+    .pcs-response.error { color: var(--pcs-red); }
+    .pcs-response.visible { display: block; }
+
+    /* ── ROC ──────────────────────────────────────────────────────────────── */
+    .roc-img { width: 100%; border-radius: var(--pcs-radius-sm); border: 1px solid var(--pcs-border); }
+    .roc-placeholder { padding: 2.5rem; text-align: center; color: var(--pcs-muted); border: 2px dashed var(--pcs-border); border-radius: var(--pcs-radius-sm); }
+    .roc-placeholder i { font-size: 2.5rem; display: block; margin-bottom: .75rem; }
+
+    /* ── Match badge ──────────────────────────────────────────────────────── */
+    .match-yes { color: var(--pcs-green); font-weight: 700; }
+    .match-no  { color: var(--pcs-red);   font-weight: 700; }
+
+    /* ── Utility ──────────────────────────────────────────────────────────── */
+    .font-mono { font-family: var(--pcs-mono); }
+    .text-accent { color: var(--pcs-accent); }
+    .text-muted-pcs { color: var(--pcs-muted); }
+    .gap-gutter { gap: 1.25rem; }
+
+    /* ── Camera Monitor thumbnails ───────────────────────────────────────── */
+    .cam-monitor-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: .875rem;
+    }
+    .cam-monitor-card {
+      background: var(--pcs-surface-2);
+      border: 1px solid var(--pcs-border);
+      border-radius: var(--pcs-radius-sm);
+      overflow: hidden;
+      transition: border-color .2s, box-shadow .2s;
+      cursor: default;
+      position: relative;
+    }
+    .cam-monitor-card:hover { border-color: var(--pcs-accent); box-shadow: var(--pcs-glow); }
+    .cam-monitor-card.status-alert    { border-color: var(--pcs-red);   box-shadow: 0 0 0 2px rgba(239,68,68,.2); }
+    .cam-monitor-card.status-activity { border-color: var(--pcs-amber); }
+    /* thumbnail wrapper — 16:9 aspect ratio */
+    .cam-thumb-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: var(--pcs-bg);
+      overflow: hidden;
+    }
+    .cam-thumb-img {
+      width: 100%; height: 100%;
+      object-fit: cover; display: block;
+      opacity: 0; transition: opacity .3s;
+    }
+    .cam-thumb-placeholder {
+      width: 100%; height: 100%;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--pcs-border); font-size: 2rem;
+    }
+    /* coloured stripe at top of thumbnail indicating status */
+    .cam-thumb-status-stripe {
+      position: absolute; top: 0; left: 0; right: 0; height: 3px;
+      transition: background .3s;
+    }
+    .status-idle     .cam-thumb-status-stripe { background: var(--pcs-green); }
+    .status-activity .cam-thumb-status-stripe { background: var(--pcs-amber); }
+    .status-alert    .cam-thumb-status-stripe { background: var(--pcs-red); box-shadow: 0 0 6px var(--pcs-red); }
+    /* event chips overlaid on bottom of thumbnail */
+    .cam-events-overlay {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: linear-gradient(transparent, rgba(8,15,26,.85));
+      padding: .3rem .4rem .28rem;
+      display: flex; flex-wrap: wrap; gap: .25rem;
+      min-height: 28px;
+    }
+    .cam-event-chip {
+      font-size: .6rem; font-weight: 700; letter-spacing: .04em;
+      padding: .1rem .35rem; border-radius: 3px;
+      text-transform: uppercase; line-height: 1.4;
+    }
+    .cam-event-chip.verify-match   { background:rgba(34,197,94,.25);  color:var(--pcs-green); border:1px solid rgba(34,197,94,.4); }
+    .cam-event-chip.verify-nomatch { background:rgba(239,68,68,.2);   color:var(--pcs-red);   border:1px solid rgba(239,68,68,.35); }
+    .cam-event-chip.alert-chip     { background:rgba(239,68,68,.3);   color:#fca5a5;          border:1px solid rgba(239,68,68,.4); }
+    /* card footer */
+    .cam-monitor-footer { padding: .5rem .65rem .45rem; }
+    .cam-monitor-name {
+      font-size: .78rem; font-weight: 600; color: var(--pcs-text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .cam-monitor-sub {
+      font-size: .67rem; color: var(--pcs-muted); font-family: var(--pcs-mono);
+      margin-top: .1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    /* live-verify similarity bar */
+    .cam-sim-wrap  { margin-top: .35rem; display: flex; align-items: center; gap: .4rem; }
+    .cam-sim-track { flex:1; height:4px; background:var(--pcs-border); border-radius:2px; overflow:hidden; }
+    .cam-sim-fill  { height:100%; border-radius:2px; transition:width .4s ease, background .3s; }
+    .cam-sim-val   { font-size:.67rem; font-family:var(--pcs-mono); color:var(--pcs-muted); flex-shrink:0; }
+
+    /* ── Live camera ─────────────────────────────────────────────────────── */
+    .cam-wrap {
+      position: relative;
+      background: #000;
+      border-radius: var(--pcs-radius-sm);
+      overflow: hidden;
+      line-height: 0;                     /* remove inline-block gap below video */
+    }
+    .cam-video {
+      width: 100%; height: 340px;
+      object-fit: cover;
+      display: block;
+      border-radius: var(--pcs-radius-sm);
+    }
+    .cam-canvas { display: none; }        /* off-screen capture surface */
+
+    /* ── Multi-face verify overlay ───────────────────────────────────────── */
+    .mfv-wrap {
+      position: relative; line-height: 0;
+      background: #000;
+      border-radius: var(--pcs-radius-sm);
+      overflow: hidden;
+    }
+    .mfv-video {
+      width: 100%; height: 420px;
+      object-fit: cover; display: block;
+      border-radius: var(--pcs-radius-sm);
+    }
+    .mfv-canvas-overlay {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+    }
+    .mfv-placeholder {
+      width: 100%; height: 420px;
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: .5rem;
+      background: var(--pcs-bg);
+      border: 2px dashed var(--pcs-border);
+      border-radius: var(--pcs-radius-sm);
+      color: var(--pcs-muted); font-size: .85rem;
+    }
+    .mfv-placeholder i { font-size: 2.5rem; opacity: .6; }
+    .mfv-status {
+      font-size: .8rem; font-family: var(--pcs-mono);
+      color: var(--pcs-muted); margin-top: .5rem; text-align: center;
+      min-height: 1.4rem;
+    }
+    .face-tag {
+      display: inline-flex; align-items: center; gap: .35rem;
+      padding: .25rem .6rem; border-radius: 6px;
+      font-size: .75rem; font-weight: 700; font-family: var(--pcs-mono);
+      margin: .2rem;
+    }
+    .face-tag.match   { background: rgba(34,197,94,.18);  color: var(--pcs-green); border: 1px solid var(--pcs-green); }
+    .face-tag.nomatch { background: rgba(239,68,68,.18);  color: var(--pcs-red);   border: 1px solid var(--pcs-red);   }
+    .face-tag.unknown { background: rgba(245,158,11,.18); color: var(--pcs-amber); border: 1px solid var(--pcs-amber); }
+    .cam-overlay {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      padding: .4rem .75rem;
+      font-size: .82rem; font-weight: 700; font-family: var(--pcs-mono);
+      text-align: center;
+      backdrop-filter: blur(6px);
+      transition: background .2s, color .2s;
+      border-radius: 0 0 var(--pcs-radius-sm) var(--pcs-radius-sm);
+    }
+    .cam-overlay.idle    { background: rgba(15,29,46,.75); color: var(--pcs-muted); }
+    .cam-overlay.match   { background: rgba(34,197,94,.25); color: var(--pcs-green);
+                           box-shadow: 0 0 0 2px var(--pcs-green) inset; }
+    .cam-overlay.nomatch { background: rgba(239,68,68,.25); color: var(--pcs-red);
+                           box-shadow: 0 0 0 2px var(--pcs-red)   inset; }
+    .cam-placeholder {
+      width: 100%; height: 340px;
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: .4rem;
+      background: var(--pcs-bg);
+      border: 2px dashed var(--pcs-border);
+      border-radius: var(--pcs-radius-sm);
+      color: var(--pcs-muted); font-size: .82rem;
+    }
+    .cam-placeholder i { font-size: 2rem; }
+    .sim-bar {
+      height: 6px; border-radius: 3px;
+      background: var(--pcs-border); overflow: hidden;
+      margin-top: .5rem;
+    }
+    .sim-fill {
+      height: 100%; border-radius: 3px; width: 0;
+      background: linear-gradient(90deg, var(--pcs-red), var(--pcs-amber), var(--pcs-green));
+      transition: width .2s ease;
+    }
+    .cam-btn-row { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .75rem; }
+
+    /* ── Live Attendance card ────────────────────────────────────────────── */
+    .att-stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: .75rem;
+      margin-bottom: 1.25rem;
+    }
+    .att-stat-box {
+      background: var(--pcs-surface-2);
+      border: 1px solid var(--pcs-border);
+      border-radius: var(--pcs-radius-sm);
+      padding: .85rem 1rem;
+      display: flex; flex-direction: column; gap: .2rem;
+    }
+    .att-stat-box .label {
+      font-size: .68rem; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--pcs-muted);
+    }
+    .att-stat-box .value {
+      font-size: 1.6rem; font-weight: 700; line-height: 1.1;
+      font-family: var(--pcs-mono); color: var(--pcs-text);
+    }
+    .att-stat-box .sub { font-size: .7rem; color: var(--pcs-muted); }
+    .att-ws-badge {
+      font-size: .65rem; font-weight: 700; padding: .15rem .55rem;
+      border-radius: 999px; letter-spacing: .06em; text-transform: uppercase;
+    }
+    .att-ws-badge.connected    { background: rgba(34,197,94,.15);  color: var(--pcs-green);  }
+    .att-ws-badge.disconnected { background: rgba(239,68,68,.15);  color: var(--pcs-red);    }
+    .att-cam-row { animation: fadeIn .25s ease; }
+    .att-match-bar {
+      display: inline-block; height: 6px; border-radius: 3px;
+      background: linear-gradient(90deg, var(--pcs-accent), var(--pcs-green));
+      min-width: 2px; vertical-align: middle;
+    }
+    #att-last-updated { font-size: .7rem; color: var(--pcs-muted); font-family: var(--pcs-mono); }
+
+    /* ── Left-object panel ───────────────────────────────────────────────── */
+    .lo-thumb {
+      width:80px; height:54px; object-fit:cover; border-radius:4px;
+      border:1px solid var(--pcs-border); display:block;
+    }
+    .lo-thumb-placeholder {
+      width:80px; height:54px; border-radius:4px;
+      border:1px solid var(--pcs-border); background:var(--pcs-bg);
+      display:flex; align-items:center; justify-content:center;
+      color:var(--pcs-muted);
+    }
+    .lo-status-active   { color:#f59e0b; font-weight:600; font-size:.75rem; }
+    .lo-status-removed  { color:var(--pcs-green); font-size:.75rem; }
+    .lo-status-threat   { color:#ef4444; font-weight:600; font-size:.75rem; }
+
+    /* ── Loitering panel ─────────────────────────────────────────────────── */
+    .loiter-status-active    { color:#f59e0b; font-weight:600; font-size:.75rem; }
+    .loiter-status-dismissed { color:var(--pcs-green); font-size:.75rem; }
+  </style>
+</head>
+
+<body>
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TOPBAR
+     ══════════════════════════════════════════════════════════════════════════ -->
+<nav class="pcs-topbar">
+  <a class="brand" href="/">
+    <i class="bi bi-shield-lock-fill"></i>
+    Privacy Campus Security
+  </a>
+  <span class="pill">v0.3</span>
+  <span class="uptime" id="uptime-label" title="Server uptime">● live</span>
+  <div class="pcs-status-dot" title="System operational"></div>
+  <!-- Alert bell -->
+  <div style="margin-left:auto;display:flex;align-items:center;gap:.75rem;">
+    <a href="#alerts-section" class="d-flex align-items-center gap-1 text-decoration-none" style="color:var(--pcs-text-dim);font-size:.85rem;">
+      <i class="bi bi-bell-fill" style="color:var(--pcs-amber);"></i>
+      <span id="alert-badge" class="badge rounded-pill"
+            style="background:var(--pcs-red);display:none;">0</span>
+    </a>
+    <a href="/admin/campus" style="color:var(--pcs-text-dim);font-size:.85rem;text-decoration:none;">
+      <i class="bi bi-map-fill me-1"></i>Map
+    </a>
+    <a href="/enroll/screen" style="color:var(--pcs-text-dim);font-size:.85rem;text-decoration:none;">
+      <i class="bi bi-camera-fill me-1"></i>Enroll
+    </a>
+  </div>
+</nav>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     MAIN CONTENT
+     ══════════════════════════════════════════════════════════════════════════ -->
+<div class="pcs-wrapper">
+
+  <!-- ── Summary cards ─────────────────────────────────────────────────── -->
+  <div class="section-label"><i class="bi bi-bar-chart-line-fill"></i> Overview</div>
+
+  <div class="row row-cols-2 row-cols-md-4 g-3 mb-4">
+    <!-- Enrolled -->
+    <div class="col">
+      <div class="stat-card h-100">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <div class="stat-label"><i class="bi bi-people me-1"></i>Enrolled</div>
+            <div class="stat-value" id="stat-enrolled">{{ enrolled }}</div>
+            <div class="stat-sub">Active identities</div>
+          </div>
+          <i class="bi bi-person-check stat-icon"></i>
+        </div>
+      </div>
+    </div>
+
+    <!-- Best K-Shot Accuracy -->
+    <div class="col">
+      <div class="stat-card h-100">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <div class="stat-label"><i class="bi bi-trophy me-1"></i>Best Acc.</div>
+            <div class="stat-value" id="stat-top1">
+              {% if top1_best is not none %}{{ top1_best }}%{% else %}<span class="text-muted-pcs" style="font-size:1.1rem">—</span>{% endif %}
+            </div>
+            <div class="stat-sub">Top-1 (best K)</div>
+          </div>
+          <i class="bi bi-speedometer2 stat-icon"></i>
+        </div>
+      </div>
+    </div>
+
+    <!-- ROC AUC -->
+    <div class="col">
+      <div class="stat-card h-100">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <div class="stat-label"><i class="bi bi-activity me-1"></i>ROC AUC</div>
+            <div class="stat-value" id="stat-auc">
+              {% if pairs_metrics and pairs_metrics.roc_auc is defined %}
+                {{ "%.3f"|format(pairs_metrics.roc_auc|float) }}
+              {% elif pairs_metrics and 'roc_auc' in pairs_metrics %}
+                {{ "%.3f"|format(pairs_metrics['roc_auc']|float) }}
+              {% else %}<span class="text-muted-pcs" style="font-size:1.1rem">—</span>{% endif %}
+            </div>
+            <div class="stat-sub">Pairs verification</div>
+          </div>
+          <i class="bi bi-graph-up-arrow stat-icon"></i>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAR @ FAR 1% -->
+    <div class="col">
+      <div class="stat-card h-100">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <div class="stat-label"><i class="bi bi-bullseye me-1"></i>TAR@FAR 1%</div>
+            <div class="stat-value" id="stat-tar">
+              {% if pairs_metrics and 'tar_at_far_1pct' in pairs_metrics %}
+                {{ "%.3f"|format(pairs_metrics['tar_at_far_1pct']|float) }}
+              {% else %}<span class="text-muted-pcs" style="font-size:1.1rem">—</span>{% endif %}
+            </div>
+            <div class="stat-sub">Genuine accept rate</div>
+          </div>
+          <i class="bi bi-crosshair2 stat-icon"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Row: Episode accuracy chart + Events feed ─────────────────────── -->
+  <div class="row g-3 mb-3">
+
+    <!-- Episode accuracy bar chart -->
+    <div class="col-lg-7">
+      <div class="pcs-card h-100">
+        <div class="pcs-card-header">
+          <span class="pcs-card-title"><i class="bi bi-bar-chart-fill"></i>Few-Shot Accuracy by K</span>
+          <button class="pcs-btn pcs-btn-sm" style="background:none;border:1px solid var(--pcs-border);color:var(--pcs-muted);" onclick="reloadMetrics()">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+          </button>
+        </div>
+        <div class="chart-wrap" style="height:240px">
+          <canvas id="chart-accuracy"></canvas>
+        </div>
+        <div class="mt-2" style="font-size:.72rem;color:var(--pcs-muted);">
+          N-way K-shot episodic evaluation on LFW test classes •
+          Error bars = ±95% CI •
+          <span class="font-mono" id="chart-source">{{ source_dir or 'no data yet' }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live events feed -->
+    <div class="col-lg-5">
+      <div class="pcs-card h-100" style="display:flex;flex-direction:column">
+        <div class="pcs-card-header mb-0">
+          <span class="pcs-card-title"><i class="bi bi-activity"></i>Live Event Feed</span>
+          <!-- [MQTT] Replace polling indicator with "WS Connected" badge when socket.io is wired -->
+          <span class="pill" style="background:rgba(34,197,94,.15);color:var(--pcs-green);font-size:.65rem;" id="poll-badge">● polling</span>
+        </div>
+        <div class="mt-3 flex-grow-1" style="overflow:hidden;">
+          <div id="events-feed">
+            {% for ev in recent_events %}
+              {% set icons = {'enroll':'person-plus-fill','verify':'patch-check-fill','anomaly':'exclamation-triangle-fill','alarm':'bell-fill'} %}
+              <div class="event-row">
+                <div class="event-icon {{ ev.kind }}">
+                  <i class="bi bi-{{ icons.get(ev.kind, 'info-circle-fill') }}"></i>
+                </div>
+                <div class="event-body">
+                  <div class="event-title">{{ ev.subject_id or ev.kind | title }}</div>
+                  <div class="event-meta">
+                    {% if ev.meta %}{{ ev.meta | tojson | truncate(60) }}{% else %}—{% endif %}
+                  </div>
+                </div>
+                <div class="event-ts">{{ ev.timestamp[11:19] }}</div>
+              </div>
+            {% else %}
+              <div class="roc-placeholder" style="padding:1.5rem;">
+                <i class="bi bi-hourglass-split" style="font-size:1.5rem;display:block;margin-bottom:.5rem;"></i>
+                Waiting for events…<br>
+                <small>Enroll or verify a subject to see live events.</small>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Row: K-shot table + ROC curve ─────────────────────────────────── -->
+  <div class="row g-3 mb-3">
+
+    <!-- K-shot table -->
+    <div class="col-lg-6">
+      <div class="pcs-card">
+        <div class="pcs-card-header">
+          <span class="pcs-card-title"><i class="bi bi-table"></i>Top-1 Accuracy by K</span>
+        </div>
+        {% if k_shot_rows %}
+        <table class="pcs-table">
+          <thead>
+            <tr>
+              <th>K (shots)</th>
+              <th>N-way</th>
+              <th>Mean Acc.</th>
+              <th>±95% CI</th>
+              <th>Episodes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in k_shot_rows %}
+            {% set acc = (row.get('mean_accuracy', row.get('accuracy', 0)) | float) %}
+            <tr>
+              <td><span class="font-mono text-accent">{{ row.get('k_shot', row.get('K','—')) }}</span></td>
+              <td class="font-mono">{{ row.get('n_way', '—') }}</td>
+              <td>
+                <div class="acc-bar">
+                  <div class="acc-track"><div class="acc-fill" style="width:{{ (acc*100)|round(1) }}%"></div></div>
+                  <span class="font-mono">{{ "%.4f"|format(acc) }}</span>
+                </div>
+              </td>
+              <td class="font-mono text-muted-pcs">±{{ "%.4f"|format(row.get('ci95', 0)|float) }}</td>
+              <td class="font-mono text-muted-pcs">{{ row.get('num_episodes', '—') }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <div class="roc-placeholder">
+          <i class="bi bi-table"></i>
+          No evaluation data yet.<br>
+          <small>Run <code>make eval-lfw</code> or <code>make run-example</code> to generate results.</small>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- ROC curve -->
+    <div class="col-lg-6">
+      <div class="pcs-card">
+        <div class="pcs-card-header">
+          <span class="pcs-card-title"><i class="bi bi-graph-up"></i>ROC Curve — Pairs Verification</span>
+        </div>
+        {% if roc_image_uri %}
+          <img class="roc-img" src="{{ roc_image_uri }}" alt="ROC curve" loading="lazy"/>
+        {% else %}
+          <div class="roc-placeholder">
+            <i class="bi bi-graph-up"></i>
+            ROC plot not available.<br>
+            <small>Run <code>make eval-lfw</code> with raw images (no <code>--skip-pairs</code>) to generate.</small>
+          </div>
+        {% endif %}
+
+        {% if pairs_metrics %}
+        <div class="mt-3">
+          <table class="pcs-table" style="font-size:.8rem;">
+            <tbody>
+              {% for key, label in [
+                  ('accuracy',          'Accuracy'),
+                  ('f1',                'F1 Score'),
+                  ('roc_auc',           'ROC AUC'),
+                  ('tar_at_far_0.1pct', 'TAR @ FAR=0.1%'),
+                  ('tar_at_far_1pct',   'TAR @ FAR=1%')] %}
+              {% if key in pairs_metrics %}
+              <tr>
+                <td class="text-muted-pcs ps-0">{{ label }}</td>
+                <td class="font-mono text-accent pe-0">{{ "%.4f"|format(pairs_metrics[key]|float) }}</td>
+              </tr>
+              {% endif %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Anomaly score timeline ─────────────────────────────────────────── -->
+  <div class="row g-3 mb-3">
+    <div class="col-12">
+      <div class="pcs-card">
+        <div class="pcs-card-header">
+          <span class="pcs-card-title"><i class="bi bi-waveform"></i>Anomaly Score Timeline</span>
+          <!-- [PLUGIN] Replace chart with real video-frame reconstruction error from autoencoder -->
+          <span style="font-size:.72rem;color:var(--pcs-muted);">
+            Source: <code>experiments/anomaly_scores.csv</code>
+          </span>
+        </div>
+        <div class="chart-wrap" style="height:180px;">
+          <canvas id="chart-anomaly"></canvas>
+        </div>
+        <div class="mt-2" style="font-size:.72rem;color:var(--pcs-muted);">
+          <i class="bi bi-info-circle me-1"></i>
+          Populate <code>experiments/anomaly_scores.csv</code> (columns: <code>timestamp, score, label</code>)
+          from <code>src/models/autoencoder.py</code> or any live sensor feed.
+          <!-- [MQTT] Subscribe to pcs/anomaly and call data_provider.record_event('anomaly', meta={'score': s}) -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Camera Monitor ────────────────────────────────────────────────── -->
+  <div class="section-label" style="margin-top:2rem;">
+    <i class="bi bi-grid-3x3-gap-fill"></i> Camera Monitor
+    <span style="font-size:.65rem;font-weight:400;color:var(--pcs-muted);">— lazy-loaded thumbnails &nbsp;·&nbsp; live status &nbsp;·&nbsp; recent events</span>
+    <button class="pcs-btn pcs-btn-sm" style="margin-left:auto;background:none;border:1px solid var(--pcs-border);color:var(--pcs-muted);" onclick="_camMonitor.refresh()">
+      <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+  </div>
+  <div class="row g-3 mb-4">
+    <div class="col-12">
+      <div class="pcs-card">
+        <div id="cam-monitor-grid" class="cam-monitor-grid">
+          <div style="color:var(--pcs-muted);font-size:.82rem;padding:.5rem;">Loading cameras…</div>
+        </div>
+        <div style="margin-top:.65rem;font-size:.72rem;color:var(--pcs-muted);">
+          <i class="bi bi-info-circle me-1"></i>
+          Thumbnails refresh every 5 s from MQTT frames&nbsp;·&nbsp;
+          hover a card for last-seen timestamp&nbsp;·&nbsp;
+          the similarity bar reflects the most recent face-verify result at that camera.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Live Camera panel ───────────────────────────────────────────────── -->
+  <div class="section-label"><i class="bi bi-camera-video-fill"></i> Live Camera — Enroll &amp; Verify</div>
+
+  <div class="row g-3 mb-4">
+
+    <!-- Live Enroll -->
+    <div class="col-md-6">
+      <div class="pcs-card">
+        <div class="pcs-card-header">
+          <span class="pcs-card-title"><i class="bi bi-camera-fill"></i>Camera Enroll</span>
+          <span style="font-size:.7rem;color:var(--pcs-muted);">snapshot → store</span>
+        </div>
+
+        <div class="mb-3">
+          <label class="pcs-label" for="cam-enroll-id">Subject ID</label>
+          <input class="pcs-input" type="text" id="cam-enroll-id" placeholder="e.g. EMP-001" autocomplete="off"/>
+        </div>
+
+        <!-- Camera preview -->
+        <div id="cam-enroll-wrap" class="cam-placeholder">
+          <i class="bi bi-camera-video-off"></i>
+          <span>Camera not started</span>
+        </div>
+        <video  id="cam-enroll-video"  class="cam-video" autoplay playsinline muted style="display:none"></video>
+        <canvas id="cam-enroll-canvas" class="cam-canvas" width="640" height="480"></canvas>
+
+        <div class="cam-btn-row">
+          <button class="pcs-btn pcs-btn-primary" id="btn-cam-enroll-start"
+                  onclick="camEnroll.start()">
+            <i class="bi bi-camera-video"></i> Start Camera
+          </button>
+          <button class="pcs-btn" id="btn-cam-enroll-snap"
+                  onclick="camEnroll.snap()"
+                  style="border:1px solid var(--pcs-border);color:var(--pcs-text);background:none;" disabled>
+            <i class="bi bi-camera"></i> Capture &amp; Enroll
+          </button>
+          <button class="pcs-btn" id="btn-cam-enroll-stop"
+                  onclick="camEnroll.stop()"
+                  style="border:1px solid var(--pcs-border);color:var(--pcs-muted);background:none;" disabled>
+            <i class="bi bi-stop-circle"></i>
+          </button>
+        </div>
+        <div class="pcs-response" id="cam-enroll-result"></div>
+      </div>
+    </div>
+
+    <!-- Live Verify -->
+    <div class="col-md-6">
+      <div class="pcs-card">
+        <div class="pcs-card-header">
+          <span class="pcs-card-title"><i class="bi bi-shield-shaded"></i>Live Verify</span>
+          <span style="font-size:.7rem;color:var(--pcs-muted);">continuous · 4 fps</span>
+        </div>
+
+        <div class="mb-3">
+          <label class="pcs-label" for="cam-verify-id">Subject ID (must be enrolled)</label>
+          <input class="pcs-input" type="text" id="cam-verify-id" placeholder="e.g. EMP-001" autocomplete="off"/>
+        </div>
+
+        <!-- Camera preview with overlay -->
+        <div id="cam-verify-wrap" class="cam-placeholder">
+          <i class="bi bi-camera-video-off"></i>
+          <span>Camera not started</span>
+        </div>
+        <div id="cam-verify-live" style="display:none; position:relative; line-height:0;">
+          <video id="cam-verify-video" class="cam-video" autoplay playsinline muted></video>
+          <div id="cam-verify-overlay" class="cam-overlay idle">⏳ waiting…</div>
+        </div>
+        <canvas id="cam-verify-canvas" class="cam-canvas" width="640" height="480"></canvas>
+
+        <!-- Similarity meter -->
+        <div style="margin-top:.6rem;">
+          <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--pcs-muted);">
+            <span>Similarity</span>
+            <span id="cam-verify-sim-val" class="font-mono">—</span>
+          </div>
+          <div class="sim-bar"><div class="sim-fill" id="cam-verify-sim-fill"></div></div>
+          <div style="font-size:.68rem;color:var(--pcs-muted);margin-top:.25rem;" id="cam-verify-latency"></div>
+        </div>
+
+        <div class="cam-btn-row">
+          <button class="pcs-btn pcs-btn-success" id="btn-cam-verify-start"
+                  onclick="camVerify.start()">
+            <i class="bi bi-play-fill"></i> Start Verify
+          </button>
+          <button class="pcs-btn" id="btn-cam-verify-stop"
+                  onclick="camVerify.stop()"
+                  style="border:1px solid var(--pcs-border);color:var(--pcs-muted);background:none;" disabled>
+            <i class="bi bi-stop-circle"></i> Stop
+          </button>
+        </div>
+
+        <!-- Persistent last-result strip (stays visible after stream stops) -->
+        <div id="cam-verify-last"
+             style="display:none;margin-top:.75rem;padding:.45rem .75rem;
+                    border-radius:var(--pcs-radius-sm);font-size:.82rem;
+                    font-weight:700;font-family:var(--pcs-mono);text-align:center;
+                    transition:background .2s,color .2s;"></div>
+
+        <div class="pcs-response" id="cam-verify-result"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Multi-Face Frame Verify ────────────────────────────────────────── -->
+  <div class="section-label"><i class="bi bi-people-fill"></i> Multi-Face Frame Verify <span style="font-size:.65rem;font-weight:400;color:var(--pcs-muted);">— vectorised · top-k per detected face</span></div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-12">
+      <div class="pcs-card">
+        <div class="pcs-card-header">
+          <span class="pcs-card-title"><i class="bi bi-camera-reels-fill"></i>Live Multi-Face Verify</span>
+          <span style="font-size:.7rem;color:var(--pcs-muted);">detects all faces · draws bboxes · shows top match per face</span>
+        </div>
+
+        <div class="row g-3 mb-3">
+          <div class="col-sm-4">
+            <label class="pcs-label" for="mfv-k">Top-K matches per face</label>
+            <input class="pcs-input" type="number" id="mfv-k" value="3" min="1" max="10"/>
+          </div>
+          <div class="col-sm-4">
+            <label class="pcs-label" for="mfv-thresh">Min similarity threshold</label>
+            <input class="pcs-input" type="number" id="mfv-thresh" value="0.0" min="-1" max="1" step="0.05"/>
+          </div>
+          <div class="col-sm-4" style="display:flex;align-items:flex-end;gap:.5rem;flex-wrap:wrap;">
+            <button class="pcs-btn pcs-btn-primary" id="btn-mfv-start" onclick="mfvCam.start()">
+              <i class="bi bi-play-fill"></i> Start Camera
+            </button>
+            <button class="pcs-btn" id="btn-mfv-stop" onclick="mfvCam.stop()"
+                    style="border:1px solid var(--pcs-border);color:var(--pcs-muted);background:none;" disabled>
+              <i class="bi bi-stop-circle"></i> Stop
+            </button>
+          </div>
+        </div>
+
+        <!-- Video + bbox overlay canvas stacked -->
+        <div id="mfv-placeholder" class="mfv-placeholder">
+          <i class="bi bi-camera-video-off"></i>
+          <span>Start camera to begin multi-face detection</span>
+        </div>
+        <div id="mfv-live" style="display:none;">
+          <div class="mfv-wrap" id="mfv-wrap">
+            <video  id="mfv-video"  class="mfv-video"  autoplay playsinline muted></video>
+            <canvas id="mfv-overlay" class="mfv-canvas-overlay"></canvas>
+          </div>
+          <div class="mfv-status" id="mfv-status">Initialising…</div>
+          <div id="mfv-tags" style="margin-top:.5rem;"></div>
+        </div>
+
+        <!-- Hidden capture canvas -->
+        <canvas id="mfv-capture" class="cam-canvas" width="640" height="480"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Batch Enroll (multi-face photo) ──────────────────────────────── -->
+  <div class="section-label"><i class="bi bi-person-badge-fill"></i> Identity Management <span style="font-size:.65rem;font-weight:400;color:var(--pcs-muted);">(file upload)</span></div>
+
+  <div class="row g-3 mb-3">
+
+    <!-- Enroll -->
+    <div class="col-md-4">
+      <div class="pcs-card">
+        <div class="pcs-card-header">
+          <span class="pcs-card-title"><i class="bi bi-person-plus-fill"></i>Enroll Subject</span>
+        </div>
+        <div class="mb-3">
+          <label class="pcs-label" for="enroll-id">Subject ID</label>
+          <input class="pcs-input" type="text" id="enroll-id" placeholder="e.g. EMP-001" autocomplete="off"/>
+        </div>
+        <div class="mb-3">
+          <label class="pcs-label" for="enroll-img">Face Image</label>
+          <input class="pcs-input" type="file" id="enroll-img" accept="image/*"/>
+        </div>
+        <button class="pcs-btn pcs-btn-primary" onclick="enrollSubject()">
+          <i class="bi bi-upload"></i> Enroll
+        </button>
+        <div class="pcs-response" id="enroll-result"></div>
+      </div>
+    </div>
+
+    <!-- Batch Enroll -->
+    <div class="col-md-4">
+      <div class="pcs-card">
+        <div class="pcs-card-header">
+          <span class="pcs-card-title"><i class="bi bi-people-fill"></i>Batch Enroll</span>
+          <span style="font-size:.7rem;color:var(--pcs-muted);">all faces in one photo</span>
+        </div>
+        <div class="mb-3">
+          <label class="pcs-label" for="batch-enroll-gid">Group ID</label>
+          <input class="pcs-input" type="text" id="batch-enroll-gid" placeholder="e.g. SHIFT-A" value="default" autocomplete="off"/>
+        </div>
+        <div class="mb-3">
+          <label class="pcs-label" for="batch-enroll-img">Multi-Person Image</label>
+          <input class="pcs-input" type="file" id="batch-enroll-img" accept="image/*"/>
+        </div>
+        <button class="pcs-btn pcs-btn-primary" onclick="batchEnroll()">
+          <i class="bi bi-upload"></i> Batch Enroll
+        </button>
+        <div class="pcs-response" id="batch-enroll-result"></div>
+      </div>
+    </div>
+
+    <!-- Verify -->
+    <div class="col-md-4">
+      <div class="pcs-card">
+        <div class="pcs-card-header">
+          <span class="pcs-card-title"><i class="bi bi-patch-check-fill"></i>Verify Subject</span>
+        </div>
+        <div class="mb-3">
+          <label class="pcs-label" for="verify-id">Subject ID</label>
+          <input class="pcs-input" type="text" id="verify-id" placeholder="e.g. EMP-001" autocomplete="off"/>
+        </div>
+        <div class="mb-3">
+          <label class="pcs-label" for="verify-img">Query Image</label>
+          <input class="pcs-input" type="file" id="verify-img" accept="image/*"/>
+        </div>
+        <button class="pcs-btn pcs-btn-success" onclick="verifySubject()">
+          <i class="bi bi-shield-check"></i> Verify
+        </button>
+        <div class="pcs-response" id="verify-result"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Frame Verify (file upload) ────────────────────────────────────── -->
+  <div class="row g-3 mb-3">
+    <div class="col-12">
+      <div class="pcs-card">
+        <div class="pcs-card-header">
+          <span class="pcs-card-title"><i class="bi bi-image-fill"></i>Frame Verify (Photo Upload)</span>
+          <span style="font-size:.7rem;color:var(--pcs-muted);">upload a photo → detect all faces → top-k matches</span>
+        </div>
+        <div class="row g-3 align-items-end">
+          <div class="col-sm-5">
+            <label class="pcs-label" for="fv-img">Image (may contain multiple faces)</label>
+            <input class="pcs-input" type="file" id="fv-img" accept="image/*"/>
+          </div>
+          <div class="col-sm-2">
+            <label class="pcs-label" for="fv-k">Top-K</label>
+            <input class="pcs-input" type="number" id="fv-k" value="3" min="1" max="10"/>
+          </div>
+          <div class="col-sm-2">
+            <label class="pcs-label" for="fv-thresh">Min Similarity</label>
+            <input class="pcs-input" type="number" id="fv-thresh" value="0.0" min="-1" max="1" step="0.05"/>
+          </div>
+          <div class="col-sm-3" style="padding-bottom:.25rem;">
+            <button class="pcs-btn pcs-btn-success w-100" onclick="frameVerify()">
+              <i class="bi bi-shield-check"></i> Verify Frame
+            </button>
+          </div>
+        </div>
+        <div class="pcs-response" id="fv-result"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Live Attendance ──────────────────────────────────────────────────── -->
+  <div class="section-label"><i class="bi bi-calendar-check-fill"></i> Live Attendance
+    <span style="font-size:.65rem;font-weight:400;color:var(--pcs-muted);">— updates via WebSocket every 3 s</span>
+  </div>
+
+  <div class="row g-3 mb-3">
+    <div class="col-12">
+      <div class="pcs-card" id="att-card">
+        <div class="pcs-card-header">
+          <span class="pcs-card-title"><i class="bi bi-person-lines-fill"></i>Attendance Summary</span>
+          <div style="display:flex;align-items:center;gap:.75rem;">
+            <span id="att-last-updated">—</span>
+            <span id="att-ws-badge" class="att-ws-badge disconnected">● connecting</span>
+          </div>
+        </div>
+
+        <!-- Stat boxes -->
+        <div class="att-stat-grid">
+          <div class="att-stat-box">
+            <span class="label"><i class="bi bi-check2-all me-1"></i>Total Marks</span>
+            <span class="value" id="att-total">—</span>
+            <span class="sub">all-time</span>
+          </div>
+          <div class="att-stat-box">
+            <span class="label"><i class="bi bi-shield-check me-1"></i>Matched</span>
+            <span class="value" id="att-matched" style="color:var(--pcs-green);">—</span>
+            <span class="sub">verified present</span>
+          </div>
+          <div class="att-stat-box">
+            <span class="label"><i class="bi bi-x-circle me-1"></i>Unmatched</span>
+            <span class="value" id="att-unmatched" style="color:var(--pcs-red);">—</span>
+            <span class="sub">no face match</span>
+          </div>
+          <div class="att-stat-box">
+            <span class="label"><i class="bi bi-people me-1"></i>Subjects</span>
+            <span class="value" id="att-subjects" style="color:var(--pcs-accent);">—</span>
+            <span class="sub">unique identities</span>
+          </div>
+          <div class="att-stat-box">
+            <span class="label"><i class="bi bi-camera-video me-1"></i>Cameras</span>
+            <span class="value" id="att-cameras" style="color:var(--pcs-amber);">—</span>
+            <span class="sub">active sensors</span>
+          </div>
+          <div class="att-stat-box">
+            <span class="label"><i class="bi bi-percent me-1"></i>Match Rate</span>
+            <span class="value" id="att-rate">—</span>
+            <span class="sub">matched / total</span>
+          </div>
+        </div>
+
+        <!-- Per-camera breakdown table -->
+        <div class="pcs-card-title mb-2" style="font-size:.78rem;">
+          <i class="bi bi-camera-video-fill"></i> Per-Camera Breakdown
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="pcs-table" id="att-cam-table">
+            <thead>
+              <tr>
+                <th style="text-align:left;">Camera</th>
+                <th>Total&nbsp;Marks</th>
+                <th>Matched</th>
+                <th>Unique&nbsp;Subjects</th>
+                <th style="min-width:120px">Match&nbsp;Rate</th>
+              </tr>
+            </thead>
+            <tbody id="att-cam-tbody">
+              <tr><td colspan="5" style="color:var(--pcs-muted);text-align:center;padding:1.25rem;">
+                <i class="bi bi-hourglass-split me-1"></i>Waiting for WebSocket connection…
+              </td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Old management section removed – now merged above -->
+
+  <!-- [PLUGIN] ─── Add new dashboard sections below this comment ──────────
+       Each section follows the pattern:
+         <div class="section-label">…</div>
+         <div class="row g-3 mb-3"> <div class="col-…"> <div class="pcs-card"> … </div> </div> </div>
+
+       Suggested extensions:
+         • Smart automation state-machine timeline
+         • MQTT topic message log
+         • Per-camera anomaly feed
+         • Door / alarm command history
+  ─────────────────────────────────────────────────────────────────────────── -->
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       SECURITY ALERTS PANEL
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <div class="section-label" id="alerts-section" style="margin-top:2rem;">
+    <i class="bi bi-shield-exclamation"></i>
+    Security Alerts
+    <span id="alert-unacked-label" class="badge rounded-pill ms-1"
+          style="background:var(--pcs-red);font-size:.65rem;display:none;">0 unacked</span>
+  </div>
+
+  <!-- filter bar -->
+  <div class="d-flex align-items-center gap-2 mb-2" style="flex-wrap:wrap;">
+    <select id="alert-filter-type" class="pcs-input" style="width:auto;font-size:.8rem;padding:.3rem .65rem;">
+      <option value="">All types</option>
+      <option value="forced_entry">Forced Entry</option>
+      <option value="tailgate">Tailgate</option>
+      <option value="safety_alert">Safety Alert</option>
+    </select>
+    <select id="alert-filter-ack" class="pcs-input" style="width:auto;font-size:.8rem;padding:.3rem .65rem;">
+      <option value="">All</option>
+      <option value="1">Unacked only</option>
+    </select>
+    <button onclick="_loadAlerts()" class="btn btn-sm"
+            style="background:var(--pcs-border);color:var(--pcs-text);border:none;font-size:.8rem;">
+      <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+  </div>
+
+  <div class="pcs-card" style="padding:0;overflow:hidden;">
+    <div style="overflow-x:auto;">
+      <table class="pcs-table" style="min-width:820px;">
+        <thead>
+          <tr>
+            <th style="text-align:left;">Severity</th>
+            <th style="text-align:left;">Snapshot</th>
+            <th style="text-align:left;">Door</th>
+            <th style="text-align:left;">Camera</th>
+            <th style="text-align:left;">Subject</th>
+            <th style="text-align:left;">Time</th>
+            <th>Conf.</th>
+            <th style="text-align:left;">Status</th>
+          </tr>
+        </thead>
+        <tbody id="alert-tbody">
+          <tr id="alert-empty-row">
+            <td colspan="8" style="text-align:center;color:var(--pcs-muted);padding:1.5rem;font-size:.83rem;">
+              <i class="bi bi-check-circle me-1"></i>No alerts
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Ack operator modal -->
+  <div class="modal fade" id="ackModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+      <div class="modal-content" style="background:var(--pcs-surface);border:1px solid var(--pcs-border);">
+        <div class="modal-header" style="border-color:var(--pcs-border);">
+          <h5 class="modal-title" style="font-size:.9rem;color:var(--pcs-text);">Acknowledge Alert</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <label class="pcs-label" for="ack-operator-input">Your name / ID</label>
+          <input id="ack-operator-input" class="pcs-input" type="text"
+                 placeholder="e.g. Officer Smith" autocomplete="off">
+        </div>
+        <div class="modal-footer" style="border-color:var(--pcs-border);">
+          <button type="button" class="btn btn-sm" data-bs-dismiss="modal"
+                  style="background:var(--pcs-border);color:var(--pcs-muted);border:none;">Cancel</button>
+          <button type="button" class="btn btn-sm" id="ack-submit-btn"
+                  style="background:var(--pcs-accent);color:#fff;border:none;">Acknowledge</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       LEFT OBJECT DETECTION PANEL
+       ═══════════════════════════════════════════════════════════════ -->
+  <div class="section-label" id="lo-section" style="margin-top:2.5rem;">
+    <i class="bi bi-bag-x"></i>
+    Left Object Detection
+    <span id="lo-active-badge" class="badge rounded-pill ms-1"
+          style="background:var(--pcs-red);font-size:.65rem;display:none;">0 active</span>
+  </div>
+
+  <!-- filter bar -->
+  <div class="d-flex align-items-center gap-2 mb-2" style="flex-wrap:wrap;">
+    <input id="lo-filter-camera" class="pcs-input" type="text"
+           placeholder="Camera ID filter"
+           style="width:180px;font-size:.8rem;padding:.3rem .65rem;">
+    <select id="lo-filter-status" class="pcs-input" style="width:auto;font-size:.8rem;padding:.3rem .65rem;">
+      <option value="">All statuses</option>
+      <option value="active">Active only</option>
+      <option value="removed">Removed</option>
+      <option value="threat">Threat confirmed</option>
+    </select>
+    <button onclick="_loadLeftObjects()" class="btn btn-sm"
+            style="background:var(--pcs-border);color:var(--pcs-text);border:none;font-size:.8rem;">
+      <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+    <button onclick="_loTrigger()" class="btn btn-sm"
+            style="background:#1e3a4a;color:#38bdf8;border:1px solid #1e3a4a;font-size:.78rem;"
+            title="Inject a test left_object event for the first camera">
+      <i class="bi bi-lightning-fill"></i> Simulate
+    </button>
+  </div>
+
+  <div class="pcs-card" style="padding:0;overflow:hidden;">
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:.8rem;">
+        <thead>
+          <tr style="background:rgba(255,255,255,.04);color:var(--pcs-muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;">
+            <th style="padding:.55rem 1rem;text-align:left;">Snapshot</th>
+            <th style="padding:.55rem .75rem;text-align:left;">Camera</th>
+            <th style="padding:.55rem .75rem;text-align:left;">Bbox (x,y,w,h)</th>
+            <th style="padding:.55rem .75rem;text-align:left;">First Seen</th>
+            <th style="padding:.55rem .75rem;text-align:right;">Dwell</th>
+            <th style="padding:.55rem .75rem;text-align:center;">Status</th>
+            <th style="padding:.55rem .75rem;text-align:center;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="lo-tbody">
+          <tr id="lo-empty-row">
+            <td colspan="7" style="text-align:center;color:var(--pcs-muted);padding:1.5rem;font-size:.83rem;">
+              <i class="bi bi-check-circle me-1"></i>No left-object events</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       LOITERING DETECTION PANEL
+       ═══════════════════════════════════════════════════════════════ -->
+  <div class="section-label" id="loiter-section" style="margin-top:2.5rem;">
+    <i class="bi bi-person-walking"></i>
+    Loitering Detection
+    <span id="loiter-active-badge" class="badge rounded-pill ms-1"
+          style="background:var(--pcs-red);font-size:.65rem;display:none;">0 active</span>
+  </div>
+
+  <!-- filter bar -->
+  <div class="d-flex align-items-center gap-2 mb-2" style="flex-wrap:wrap;">
+    <input id="loiter-filter-camera" class="pcs-input" type="text"
+           placeholder="Camera ID filter"
+           style="width:180px;font-size:.8rem;padding:.3rem .65rem;">
+    <input id="loiter-filter-subject" class="pcs-input" type="text"
+           placeholder="Subject key filter"
+           style="width:200px;font-size:.8rem;padding:.3rem .65rem;">
+    <select id="loiter-filter-status" class="pcs-input" style="width:auto;font-size:.8rem;padding:.3rem .65rem;">
+      <option value="">All statuses</option>
+      <option value="active">Active only</option>
+      <option value="dismissed">Dismissed</option>
+    </select>
+    <button onclick="_loadLoitering()" class="btn btn-sm"
+            style="background:var(--pcs-border);color:var(--pcs-text);border:none;font-size:.8rem;">
+      <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+    <button onclick="_loiterTrigger()" class="btn btn-sm"
+            style="background:#1e3a4a;color:#38bdf8;border:1px solid #1e3a4a;font-size:.78rem;"
+            title="Inject a test loitering event for the first camera">
+      <i class="bi bi-lightning-fill"></i> Simulate
+    </button>
+  </div>
+
+  <div class="pcs-card" style="padding:0;overflow:hidden;">
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:.8rem;">
+        <thead>
+          <tr style="background:rgba(255,255,255,.04);color:var(--pcs-muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;">
+            <th style="padding:.55rem 1rem;text-align:left;">Camera</th>
+            <th style="padding:.55rem .75rem;text-align:left;">Subject</th>
+            <th style="padding:.55rem .75rem;text-align:left;">First Seen</th>
+            <th style="padding:.55rem .75rem;text-align:left;">Detected</th>
+            <th style="padding:.55rem .75rem;text-align:right;">Dwell</th>
+            <th style="padding:.55rem .75rem;text-align:center;">Status</th>
+            <th style="padding:.55rem .75rem;text-align:center;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="loiter-tbody">
+          <tr id="loiter-empty-row">
+            <td colspan="7" style="text-align:center;color:var(--pcs-muted);padding:1.5rem;font-size:.83rem;">
+              <i class="bi bi-check-circle me-1"></i>No loitering events</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer style="text-align:center;color:var(--pcs-muted);font-size:.75rem;padding-top:1rem;border-top:1px solid var(--pcs-border);margin-top:2rem;">
+    Privacy Campus Security · Research Prototype ·
+    <a href="/api/health" style="color:var(--pcs-accent);text-decoration:none;">API Health</a> ·
+    <a href="/api/metrics" style="color:var(--pcs-accent);text-decoration:none;">Metrics JSON</a>
+  </footer>
+</div><!-- /.pcs-wrapper -->
+
+<!-- Alert toast container (fixed bottom-right) -->
+<div id="alert-toast-container"></div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     SCRIPTS
+     ══════════════════════════════════════════════════════════════════════════ -->
+<!-- Socket.IO client (must load before dashboard JS) -->
+<script src="https://cdn.jsdelivr.net/npm/socket.io@4.7.5/client-dist/socket.io.min.js"></script>
+<!-- Chart.js 4 (no SRI – hash varies by CDN build) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc4s9bIOgUxi8T/jzmBnO6gcCBi9Ox6ktuijTiEqVE+2"
+        crossorigin="anonymous"></script>
+
+<script>
+/* ============================================================================
+   PCS Dashboard JavaScript
+   ============================================================================
+
+   Architecture notes:
+   ─ All API calls use the native fetch() API (no jQuery dependency).
+   ─ Charts are Chart.js 4 instances kept in module-level variables so they
+     can be updated in-place without re-mounting canvas elements.
+   ─ Event polling uses setInterval at POLL_MS cadence (default 3 s).
+     [MQTT] Search for "WebSocket hook" comment to swap polling for WS.
+   ─ Metrics polling is slower (METRICS_POLL_MS = 30 s) to avoid re-reading
+     disk files on every tick.
+
+   React migration path:
+   [REACT] Delete everything in this <script> block and replace the <body>
+    with <div id="root"></div>.  Import these API calls into your React app:
+      GET  /api/events?n=50
+      GET  /api/metrics
+      POST /api/enroll   (FormData: subject_id, image)
+      POST /api/verify   (FormData: subject_id, image)
+============================================================================ */
+
+'use strict';
+
+const POLL_MS         = 3_000;   // event feed refresh interval
+const METRICS_POLL_MS = 30_000;  // metrics refresh interval
+
+/* ── Palette (mirror CSS tokens) ─────────────────────────────────────────── */
+const C = {
+  accent:  '#0ea5e9',
+  green:   '#22c55e',
+  amber:   '#f59e0b',
+  red:     '#ef4444',
+  muted:   '#64748b',
+  border:  '#1e3048',
+  surface: '#0f1d2e',
+  text:    '#e2e8f0',
+};
+
+/* ── Chart defaults ──────────────────────────────────────────────────────── */
+Chart.defaults.color          = C.text;
+Chart.defaults.borderColor    = C.border;
+Chart.defaults.font.family    = "'Inter', system-ui, sans-serif";
+Chart.defaults.font.size      = 12;
+Chart.defaults.animation.duration = 600;
+
+/* ── Accuracy bar chart ──────────────────────────────────────────────────── */
+let accuracyChart = null;
+
+function buildAccuracyChart(series) {
+  const ctx = document.getElementById('chart-accuracy').getContext('2d');
+  const labels  = series.map(r => `K=${r.k}`);
+  const accs    = series.map(r => +(r.accuracy * 100).toFixed(2));
+  const ci95s   = series.map(r => +(r.ci95    * 100).toFixed(2));
+
+  const gradient = ctx.createLinearGradient(0, 0, 0, 220);
+  gradient.addColorStop(0,   'rgba(14,165,233,.8)');
+  gradient.addColorStop(1,   'rgba(34,197,94,.6)');
+
+  const cfg = {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label:           'Mean Accuracy (%)',
+        data:            accs,
+        backgroundColor: gradient,
+        borderRadius:    6,
+        borderSkipped:   false,
+        errorBars:       ci95s,  // custom
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend:  { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const ci = ci95s[ctx.dataIndex];
+              return ` ${ctx.parsed.y.toFixed(2)} ± ${ci.toFixed(2)} %`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: { grid: { color: C.border }, ticks: { color: C.text } },
+        y: {
+          min: 0, max: 100,
+          grid: { color: C.border },
+          ticks: { color: C.text, callback: v => v + '%' },
+        },
+      },
+    },
+    plugins: [{
+      // Draw error bars manually (Chart.js 4 has no built-in errorBars)
+      id: 'errorBars',
+      afterDatasetDraw(chart) {
+        const { ctx: c, data, chartArea } = chart;
+        const meta = chart.getDatasetMeta(0);
+        if (!meta || !meta.data.length) return;
+        c.save();
+        c.strokeStyle = C.text;
+        c.lineWidth   = 1.5;
+        meta.data.forEach((bar, i) => {
+          const ci    = ci95s[i] || 0;
+          const yTop  = chart.scales.y.getPixelForValue(accs[i] + ci);
+          const yBot  = chart.scales.y.getPixelForValue(accs[i] - ci);
+          const x     = bar.x;
+          const half  = 5;
+          c.beginPath();
+          c.moveTo(x, yTop); c.lineTo(x, yBot);
+          c.moveTo(x - half, yTop); c.lineTo(x + half, yTop);
+          c.moveTo(x - half, yBot); c.lineTo(x + half, yBot);
+          c.stroke();
+        });
+        c.restore();
+      },
+    }],
+  };
+
+  if (accuracyChart) { accuracyChart.destroy(); }
+  accuracyChart = new Chart(ctx, cfg);
+}
+
+/* ── Anomaly timeline chart ──────────────────────────────────────────────── */
+let anomalyChart = null;
+
+function buildAnomalyChart(timeline) {
+  const ctx    = document.getElementById('chart-anomaly').getContext('2d');
+  const labels = timeline.map(r => r.timestamp.slice(11, 19) || r.timestamp);
+  const scores = timeline.map(r => +r.score);
+
+  const gradient = ctx.createLinearGradient(0, 0, 0, 160);
+  gradient.addColorStop(0, 'rgba(239,68,68,.35)');
+  gradient.addColorStop(1, 'rgba(239,68,68,.02)');
+
+  const cfg = {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label:           'Anomaly Score',
+        data:            scores,
+        borderColor:     C.red,
+        backgroundColor: gradient,
+        borderWidth:     2,
+        pointRadius:     scores.length > 80 ? 0 : 3,
+        pointHoverRadius:5,
+        tension:         0.35,
+        fill:            true,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend:  { display: false },
+        tooltip: { mode: 'index', intersect: false },
+      },
+      scales: {
+        x: { display: scores.length > 0, grid: { color: C.border }, ticks: { color: C.muted, maxTicksLimit: 10 } },
+        y: {
+          min: 0,
+          grid: { color: C.border },
+          ticks: { color: C.text },
+        },
+      },
+    },
+  };
+
+  if (anomalyChart) {
+    anomalyChart.data.labels            = labels;
+    anomalyChart.data.datasets[0].data  = scores;
+    anomalyChart.update('none');
+  } else {
+    anomalyChart = new Chart(ctx, cfg);
+  }
+
+  // Empty state overlay
+  const overlay = document.getElementById('anomaly-empty');
+  if (overlay) overlay.style.display = scores.length ? 'none' : 'flex';
+}
+
+/* Initialise charts from server-side rendered data */
+(function initCharts() {
+  // Build the accuracy series from Jinja-rendered k_shot_rows
+  const kRows = {{ k_shot_rows | tojson }};
+  const mapped = kRows.map(r => ({
+    k:        parseInt(r.k_shot ?? r.K ?? 1),
+    accuracy: parseFloat(r.mean_accuracy ?? r.accuracy ?? 0),
+    ci95:     parseFloat(r.ci95 ?? 0),
+  })).sort((a, b) => a.k - b.k);
+  buildAccuracyChart(mapped);
+  buildAnomalyChart([]);  // placeholder; filled on first metrics poll
+})();
+
+/* ── Health / uptime polling ─────────────────────────────────────────────── */
+async function pollHealth() {
+  try {
+    const d = await fetch('/api/health').then(r => r.json());
+    document.getElementById('stat-enrolled').textContent = d.enrolled ?? '?';
+    const up = d.uptime_s ?? 0;
+    const h  = Math.floor(up / 3600);
+    const m  = Math.floor((up % 3600) / 60);
+    const s  = Math.floor(up % 60);
+    document.getElementById('uptime-label').textContent =
+      `● ${h ? h+'h ' : ''}${m}m ${s}s`;
+  } catch { /* server unreachable – keep last value */ }
+}
+
+/* ── Events feed ─────────────────────────────────────────────────────────── */
+const EVENT_ICONS = {
+  enroll:  'person-plus-fill',
+  verify:  'patch-check-fill',
+  anomaly: 'exclamation-triangle-fill',
+  alarm:   'bell-fill',
+};
+
+let _lastEventId = 0;
+
+function renderEvent(ev) {
+  const icon   = EVENT_ICONS[ev.kind] ?? 'info-circle-fill';
+  const meta   = ev.meta && Object.keys(ev.meta).length
+    ? JSON.stringify(ev.meta).slice(0, 72)
+    : '—';
+  const time   = (ev.timestamp ?? '').slice(11, 19);
+  return `<div class="event-row">
+    <div class="event-icon ${ev.kind ?? 'system'}">
+      <i class="bi bi-${icon}"></i>
+    </div>
+    <div class="event-body">
+      <div class="event-title">${ev.subject_id ?? (ev.kind ?? 'event')}</div>
+      <div class="event-meta">${meta}</div>
+    </div>
+    <div class="event-ts">${time}</div>
+  </div>`;
+}
+
+async function pollEvents() {
+  /* [MQTT] WebSocket hook – replace this entire function body:
+   *
+   *   const socket = io();  // or new WebSocket('ws://…')
+   *   socket.on('pcs:event', ev => {
+   *     const feed = document.getElementById('events-feed');
+   *     feed.insertAdjacentHTML('afterbegin', renderEvent(ev));
+   *     while (feed.children.length > 50) feed.removeChild(feed.lastChild);
+   *   });
+   *   return;  // no polling needed
+   */
+  try {
+    const { events } = await fetch('/api/events?n=30').then(r => r.json());
+    if (!events?.length) return;
+    const newest = events[0].id;
+    if (newest === _lastEventId) return;     // nothing new
+    _lastEventId = newest;
+
+    const feed = document.getElementById('events-feed');
+    feed.innerHTML = events.map(renderEvent).join('');
+  } catch { /* ignore transient network errors */ }
+}
+
+/* ── Metrics / chart refresh ─────────────────────────────────────────────── */
+async function pollMetrics() {
+  try {
+    const m = await fetch('/api/metrics').then(r => r.json());
+
+    // Accuracy chart
+    if (m.episode_series?.length) buildAccuracyChart(m.episode_series);
+
+    // Anomaly chart
+    if (m.anomaly_scores?.length) buildAnomalyChart(m.anomaly_scores);
+
+    // Update source label
+    if (m.source_dir) {
+      document.getElementById('chart-source').textContent = m.source_dir;
+    }
+
+    // Update summary cards from live metrics
+    if (m.pairs_metrics) {
+      const pm = m.pairs_metrics;
+      if (pm.roc_auc     != null) document.getElementById('stat-auc').textContent = pm.roc_auc.toFixed(3);
+      if (pm.tar_at_far_1pct != null) document.getElementById('stat-tar').textContent = pm.tar_at_far_1pct.toFixed(3);
+    }
+    if (m.k_shot_rows?.length) {
+      const best = Math.max(...m.k_shot_rows.map(r => parseFloat(r.mean_accuracy ?? 0)));
+      if (!isNaN(best)) document.getElementById('stat-top1').textContent = (best * 100).toFixed(1) + '%';
+    }
+  } catch { /* ignore */ }
+}
+
+async function reloadMetrics() {
+  try {
+    await fetch('/api/metrics/reload');
+    await pollMetrics();
+  } catch { /* ignore */ }
+}
+
+/* ── Enroll & Verify ─────────────────────────────────────────────────────── */
+function showResult(elId, data, isError) {
+  const el = document.getElementById(elId);
+  el.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  el.className   = 'pcs-response visible' + (isError ? ' error' : '');
+}
+
+async function enrollSubject() {
+  const subjectId = document.getElementById('enroll-id').value.trim();
+  const img       = document.getElementById('enroll-img').files[0];
+  if (!subjectId || !img) { showResult('enroll-result', 'subject_id and image are required', true); return; }
+  const fd = new FormData();
+  fd.append('subject_id', subjectId);
+  fd.append('image', img);
+  try {
+    const r = await fetch('/api/enroll', { method: 'POST', body: fd });
+    const d = await r.json();
+    showResult('enroll-result', d, !r.ok);
+    if (r.ok) {
+      document.getElementById('stat-enrolled').textContent = d.total_enrolled ?? '?';
+      await pollEvents();
+    }
+  } catch (e) {
+    showResult('enroll-result', 'Network error: ' + e.message, true);
+  }
+}
+
+async function batchEnroll() {
+  const groupId = document.getElementById('batch-enroll-gid').value.trim() || 'default';
+  const img     = document.getElementById('batch-enroll-img').files[0];
+  if (!img) { showResult('batch-enroll-result', 'Image is required', true); return; }
+  const fd = new FormData();
+  fd.append('group_id', groupId);
+  fd.append('image', img);
+  showResult('batch-enroll-result', 'Detecting faces & enrolling…', false);
+  try {
+    const r = await fetch('/api/enroll/batch', { method: 'POST', body: fd });
+    const d = await r.json();
+    showResult('batch-enroll-result', d, !r.ok);
+    if (r.ok) {
+      document.getElementById('stat-enrolled').textContent = d.total_enrolled ?? '?';
+      await pollEvents();
+    }
+  } catch (e) {
+    showResult('batch-enroll-result', 'Network error: ' + e.message, true);
+  }
+}
+
+async function verifySubject() {
+  const subjectId = document.getElementById('verify-id').value.trim();
+  const img       = document.getElementById('verify-img').files[0];
+  if (!subjectId || !img) { showResult('verify-result', 'subject_id and image are required', true); return; }
+  const fd = new FormData();
+  fd.append('subject_id', subjectId);
+  fd.append('image', img);
+  try {
+    const r = await fetch('/api/verify', { method: 'POST', body: fd });
+    const d = await r.json();
+    showResult('verify-result', d, !r.ok);
+    if (r.ok) await pollEvents();
+  } catch (e) {
+    showResult('verify-result', 'Network error: ' + e.message, true);
+  }
+}
+
+async function frameVerify() {
+  const img    = document.getElementById('fv-img').files[0];
+  const k      = document.getElementById('fv-k').value || 3;
+  const thresh = document.getElementById('fv-thresh').value || 0;
+  if (!img) { showResult('fv-result', 'Upload an image first', true); return; }
+  const fd = new FormData();
+  fd.append('image', img);
+  fd.append('k', k);
+  fd.append('thresh', thresh);
+  showResult('fv-result', 'Running face detection + vectorised verify…', false);
+  try {
+    const r = await fetch('/api/verify/frame', { method: 'POST', body: fd });
+    const d = await r.json();
+    showResult('fv-result', d, !r.ok);
+    if (r.ok) await pollEvents();
+  } catch (e) {
+    showResult('fv-result', 'Network error: ' + e.message, true);
+  }
+}
+
+/* ── Boot ────────────────────────────────────────────────────────────────── */
+(function boot() {
+  pollHealth();
+  pollEvents();
+  pollMetrics();
+
+  setInterval(pollHealth,  POLL_MS);
+  setInterval(pollEvents,  POLL_MS);
+  setInterval(pollMetrics, METRICS_POLL_MS);
+}());
+
+/* ============================================================================
+   LIVE CAMERA MODULE
+   ============================================================================
+
+   camEnroll  – single-snapshot enroll from webcam
+   camVerify  – continuous per-frame verification loop (4 fps)
+
+   Both modules use the same helper captureB64() which renders the current
+   video frame onto an off-screen canvas and returns a data-URI string.
+   The backend routes (/api/enroll/frame and /api/verify/live) accept that
+   string directly — the data:image/jpeg;base64, prefix is stripped server-side.
+============================================================================ */
+
+'use strict';
+
+/* ── Shared helpers ─────────────────────────────────────────────────────── */
+
+function _camCaptureB64(videoEl, canvasEl, quality = 0.82) {
+  canvasEl.width  = videoEl.videoWidth  || 640;
+  canvasEl.height = videoEl.videoHeight || 480;
+  canvasEl.getContext('2d').drawImage(videoEl, 0, 0);
+  return canvasEl.toDataURL('image/jpeg', quality);
+}
+
+async function _camGetStream() {
+  /* Request camera; prefer environment-facing on mobile, default on desktop */
+  return navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+    audio: false,
+  });
+}
+
+function _camStopStream(stream) {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+}
+
+/* ── camEnroll ──────────────────────────────────────────────────────────── */
+
+const camEnroll = (() => {
+  let _stream = null;
+
+  const _vid    = () => document.getElementById('cam-enroll-video');
+  const _canvas = () => document.getElementById('cam-enroll-canvas');
+  const _wrap   = () => document.getElementById('cam-enroll-wrap');
+  const _result = (msg, err) => showResult('cam-enroll-result', msg, err);
+  const _btn    = id => document.getElementById(id);
+
+  async function start() {
+    try {
+      _stream = await _camGetStream();
+      const vid = _vid();
+      vid.srcObject = _stream;
+      vid.style.display = 'block';
+      _wrap().style.display = 'none';
+      _btn('btn-cam-enroll-snap').disabled  = false;
+      _btn('btn-cam-enroll-stop').disabled  = false;
+      _btn('btn-cam-enroll-start').disabled = true;
+    } catch (e) {
+      _result('Camera error: ' + e.message, true);
+    }
+  }
+
+  function stop() {
+    _camStopStream(_stream); _stream = null;
+    const vid = _vid();
+    vid.srcObject = null; vid.style.display = 'none';
+    _wrap().style.display = '';
+    _btn('btn-cam-enroll-snap').disabled  = true;
+    _btn('btn-cam-enroll-stop').disabled  = true;
+    _btn('btn-cam-enroll-start').disabled = false;
+  }
+
+  async function snap() {
+    const subjectId = document.getElementById('cam-enroll-id').value.trim();
+    if (!subjectId) { _result('Enter a Subject ID first.', true); return; }
+    if (!_stream)   { _result('Start the camera first.',   true); return; }
+
+    const b64 = _camCaptureB64(_vid(), _canvas());
+    _btn('btn-cam-enroll-snap').disabled = true;
+    _result('Enrolling…', false);
+    try {
+      const r = await fetch('/api/enroll/frame', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject_id: subjectId, image_b64: b64 }),
+      });
+      const d = await r.json();
+      _result(d, !r.ok);
+      if (r.ok) {
+        document.getElementById('stat-enrolled').textContent = d.total_enrolled ?? '?';
+        await pollEvents();
+        stop();    // close camera after successful enroll
+      }
+    } catch (e) {
+      _result('Network error: ' + e.message, true);
+    } finally {
+      if (_stream) _btn('btn-cam-enroll-snap').disabled = false;
+    }
+  }
+
+  return { start, stop, snap };
+})();
+
+/* ── camVerify ──────────────────────────────────────────────────────────── */
+
+const camVerify = (() => {
+  let _stream   = null;
+  let _timer    = null;
+  const INTERVAL_MS = 250;   // 4 fps — fast but CPU-friendly
+
+  const _vid      = () => document.getElementById('cam-verify-video');
+  const _canvas   = () => document.getElementById('cam-verify-canvas');
+  const _overlay  = () => document.getElementById('cam-verify-overlay');
+  const _simFill  = () => document.getElementById('cam-verify-sim-fill');
+  const _simVal   = () => document.getElementById('cam-verify-sim-val');
+  const _latency  = () => document.getElementById('cam-verify-latency');
+  const _liveBox  = () => document.getElementById('cam-verify-live');
+  const _wrap     = () => document.getElementById('cam-verify-wrap');
+  const _result   = (msg, err) => showResult('cam-verify-result', msg, err);
+  const _btn      = id => document.getElementById(id);
+
+  async function start() {
+    const subjectId = document.getElementById('cam-verify-id').value.trim();
+    if (!subjectId) { _result('Enter a Subject ID first.', true); return; }
+
+    try {
+      _stream = await _camGetStream();
+      const vid = _vid();
+      vid.srcObject = _stream;
+      _wrap().style.display   = 'none';
+      _liveBox().style.display = 'block';
+      _btn('btn-cam-verify-start').disabled = true;
+      _btn('btn-cam-verify-stop').disabled  = false;
+      _overlay().className   = 'cam-overlay idle';
+      _overlay().textContent = '⏳ detecting…';
+
+      /* Wait for video to actually start playing before we grab frames */
+      await new Promise(res => { vid.onloadedmetadata = res; });
+
+      _timer = setInterval(() => _tick(subjectId), INTERVAL_MS);
+    } catch (e) {
+      _result('Camera error: ' + e.message, true);
+    }
+  }
+
+  function stop() {
+    clearInterval(_timer); _timer = null;
+    _camStopStream(_stream); _stream = null;
+    const vid = _vid();
+    vid.srcObject = null;
+    _liveBox().style.display = 'none';
+    _wrap().style.display    = '';
+    _btn('btn-cam-verify-start').disabled = false;
+    _btn('btn-cam-verify-stop').disabled  = true;
+    _overlay().className   = 'cam-overlay idle';
+    _overlay().textContent = '⏳ waiting…';
+    _simFill().style.width = '0';
+    _simVal().textContent  = '—';
+    _latency().textContent = '';
+    const _ls = document.getElementById('cam-verify-last');
+    if (_ls) _ls.style.display = 'none';
+  }
+
+  let _inflight = false;   // prevent concurrent requests if server is slow
+
+  async function _tick(subjectId) {
+    if (_inflight || !_stream) return;
+    _inflight = true;
+    try {
+      const b64 = _camCaptureB64(_vid(), _canvas());
+      const r   = await fetch('/api/verify/live', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject_id: subjectId, image_b64: b64 }),
+      });
+      if (r.status === 404) {
+        stop();
+        _result('Subject "' + subjectId + '" is not enrolled. Enroll first.', true);
+        return;
+      }
+      if (!r.ok) return;
+      const d = await r.json();
+
+      /* Update similarity bar (map [-1,1] → [0,100%]) */
+      const pct = Math.max(0, Math.min(100, (d.similarity + 1) / 2 * 100));
+      _simFill().style.width = pct.toFixed(1) + '%';
+      _simVal().textContent  = d.similarity.toFixed(4);
+      _latency().textContent = 'latency: ' + d.latency_ms + ' ms';
+
+      /* Overlay badge */
+      const ov = _overlay();
+      if (d.match) {
+        ov.className   = 'cam-overlay match';
+        ov.textContent = '✓ MATCH  (' + d.similarity.toFixed(3) + ')';
+      } else {
+        ov.className   = 'cam-overlay nomatch';
+        ov.textContent = '✗ NO MATCH  (' + d.similarity.toFixed(3) + ')';
+      }
+
+      /* Persistent result strip — stays visible after stream stops */
+      const strip = document.getElementById('cam-verify-last');
+      strip.style.display = 'block';
+      if (d.match) {
+        strip.style.background = 'rgba(34,197,94,.15)';
+        strip.style.color      = 'var(--pcs-green)';
+        strip.textContent      = '✓\u00a0 MATCH · similarity\u00a0' + d.similarity.toFixed(4);
+      } else {
+        strip.style.background = 'rgba(239,68,68,.15)';
+        strip.style.color      = 'var(--pcs-red)';
+        strip.textContent      = '✗\u00a0 NO MATCH · similarity\u00a0' + d.similarity.toFixed(4);
+      }
+    } catch { /* transient network error — keep loop running */ }
+    finally  { _inflight = false; }
+  }
+
+  return { start, stop };
+})();
+/* ── mfvCam – Multi-Face Live Verify ──────────────────────────────────────
+   Opens webcam, captures frames at ~3 fps, POSTs to /api/verify/frame,
+   draws coloured bounding boxes + top-match labels on an overlay canvas.
+   Green border = best match sim ≥ 0.      Orange = store is empty / no match.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+'use strict';
+
+const mfvCam = (() => {
+  let _stream = null;
+  let _timer  = null;
+  const INTERVAL_MS = 333;   // ~3 fps – gives server enough headroom
+
+  const $   = id => document.getElementById(id);
+  const btn = id => $(`btn-mfv-${id}`);
+
+  function _drawOverlay(canvas, video, faces) {
+    const W = video.videoWidth  || video.clientWidth  || 640;
+    const H = video.videoHeight || video.clientHeight || 480;
+    canvas.width  = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+
+    // Scale bbox from 640×480 capture space to actual display space
+    const scaleX = W / ($('mfv-capture').width  || 640);
+    const scaleY = H / ($('mfv-capture').height || 480);
+
+    const tagsHtml = [];
+
+    faces.forEach((face, fi) => {
+      const [x, y, w, h] = face.bbox.map((v, i) => v * (i % 2 === 0 ? scaleX : scaleY));
+      const best = face.top_matches?.[0];
+      const match   = best?.match ?? false;
+      const sim     = best?.similarity ?? null;
+      const noStore = face.top_matches?.length === 0;
+
+      // Box colour
+      let color = '#f59e0b';  // amber = unknown / no store
+      if (!noStore && match)  color = '#22c55e';  // green  = match
+      if (!noStore && !match) color = '#ef4444';  // red    = no match
+
+      // Draw box
+      ctx.strokeStyle = color;
+      ctx.lineWidth   = 3;
+      ctx.shadowColor = color;
+      ctx.shadowBlur  = 8;
+      ctx.strokeRect(x, y, w, h);
+      ctx.shadowBlur  = 0;
+
+      // Label above box
+      const label = noStore
+        ? 'No store'
+        : (match ? `✓ ${sim?.toFixed(2)}` : `✗ ${sim?.toFixed(2)}`);
+
+      ctx.fillStyle = color;
+      ctx.font      = 'bold 13px JetBrains Mono, monospace';
+      const tw  = ctx.measureText(label).width;
+      const lx  = Math.max(0, x);
+      const ly  = y > 18 ? y - 6 : y + h + 16;
+      ctx.fillRect(lx - 2, ly - 13, tw + 8, 17);
+      ctx.fillStyle = '#000';
+      ctx.fillText(label, lx + 2, ly);
+
+      // Build tag HTML
+      const cls = noStore ? 'unknown' : (match ? 'match' : 'nomatch');
+      const keyShort = best?.subject_key?.slice(-12) ?? '—';
+      tagsHtml.push(
+        `<span class="face-tag ${cls}">` +
+        `<i class="bi bi-person-fill"></i> F${fi} · ${label} · <code>…${keyShort}</code></span>`
+      );
+    });
+
+    $('mfv-tags').innerHTML = tagsHtml.join('');
+  }
+
+  let _inflight = false;
+
+  async function _tick() {
+    if (_inflight || !_stream) return;
+    _inflight = true;
+    try {
+      const vid     = $('mfv-video');
+      const capture = $('mfv-capture');
+      capture.width  = vid.videoWidth  || 640;
+      capture.height = vid.videoHeight || 480;
+      capture.getContext('2d').drawImage(vid, 0, 0);
+      const b64 = capture.toDataURL('image/jpeg', 0.82);
+
+      const k      = parseInt($('mfv-k').value)      || 3;
+      const thresh = parseFloat($('mfv-thresh').value) || 0;
+
+      const fd = new FormData();
+      const blob = await (await fetch(b64)).blob();
+      fd.append('image',  blob, 'frame.jpg');
+      fd.append('k',      k);
+      fd.append('thresh', thresh);
+
+      const r = await fetch('/api/verify/frame', { method: 'POST', body: fd });
+      if (!r.ok) return;
+      const d = await r.json();
+
+      _drawOverlay($('mfv-overlay'), vid, d.faces ?? []);
+      $('mfv-status').textContent =
+        `${d.n_faces} face(s) detected · latency ${d.latency_ms} ms`;
+    } catch { /* transient – keep loop */ }
+    finally { _inflight = false; }
+  }
+
+  async function start() {
+    try {
+      _stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      const vid = $('mfv-video');
+      vid.srcObject = _stream;
+      $('mfv-placeholder').style.display = 'none';
+      $('mfv-live').style.display        = 'block';
+      btn('start').disabled = true;
+      btn('stop').disabled  = false;
+      await new Promise(res => { vid.onloadedmetadata = res; });
+      _timer = setInterval(_tick, INTERVAL_MS);
+    } catch (e) {
+      $('mfv-status').textContent = 'Camera error: ' + e.message;
+    }
+  }
+
+  function stop() {
+    clearInterval(_timer); _timer = null;
+    if (_stream) _stream.getTracks().forEach(t => t.stop());
+    _stream = null;
+    const vid = $('mfv-video');
+    if (vid) vid.srcObject = null;
+    $('mfv-live').style.display        = 'none';
+    $('mfv-placeholder').style.display = '';
+    btn('start').disabled = false;
+    btn('stop').disabled  = true;
+    $('mfv-status').textContent  = '';
+    $('mfv-tags').innerHTML      = '';
+  }
+
+  return { start, stop };
+})();
+
+/* ============================================================================
+   LIVE ATTENDANCE MODULE — Socket.IO
+   ============================================================================
+   Connects to the Flask-SocketIO server on the same origin, emits
+   "get_attendance" every 3 s, and re-renders the attendance card on each
+   "attendance_update" event.  Also receives broadcast pushes triggered by
+   POST /api/attendance/mark whenever new rows are inserted.
+============================================================================ */
+
+'use strict';
+
+(function initAttendanceWs() {
+  const POLL_INTERVAL_MS = 3_000;
+  const $ = id => document.getElementById(id);
+
+  /* ── Helpers ─────────────────────────────────────────────────────────── */
+
+  function _setBadge(connected) {
+    const el = $('att-ws-badge');
+    if (!el) return;
+    el.textContent = connected ? '● live' : '● offline';
+    el.className   = 'att-ws-badge ' + (connected ? 'connected' : 'disconnected');
+  }
+
+  function _fmt(n) { return n == null ? '—' : String(n); }
+
+  function _renderCard(d) {
+    if (!d) return;
+
+    /* Stat boxes */
+    const unmatched = (d.total_marks ?? 0) - (d.matched_marks ?? 0);
+    const rate = d.total_marks > 0
+      ? ((d.matched_marks / d.total_marks) * 100).toFixed(1) + '%'
+      : '—';
+
+    $('att-total').textContent    = _fmt(d.total_marks);
+    $('att-matched').textContent  = _fmt(d.matched_marks);
+    $('att-unmatched').textContent = _fmt(unmatched);
+    $('att-subjects').textContent = _fmt(d.per_subject?.length);
+    $('att-cameras').textContent  = _fmt(d.per_camera?.length);
+    $('att-rate').textContent     = rate;
+
+    /* Per-camera table */
+    const tbody = $('att-cam-tbody');
+    if (!tbody) return;
+
+    if (!d.per_camera?.length) {
+      tbody.innerHTML =
+        '<tr><td colspan="5" style="color:var(--pcs-muted);text-align:center;padding:1rem;">' +
+        '<i class="bi bi-inbox me-1"></i>No attendance records yet.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = d.per_camera.map(cam => {
+      const pct     = cam.total > 0 ? (cam.matched / cam.total * 100) : 0;
+      const barW    = Math.max(2, Math.round(pct));
+      const barHtml = `<span class="att-match-bar" style="width:${barW}px"></span>`;
+      return `<tr class="att-cam-row">
+        <td class="font-mono text-accent">${cam.camera_id}</td>
+        <td class="font-mono">${cam.total}</td>
+        <td class="font-mono" style="color:var(--pcs-green);">${cam.matched}</td>
+        <td class="font-mono" style="color:var(--pcs-accent);">${cam.unique_subjects}</td>
+        <td>${barHtml} <span class="font-mono" style="font-size:.8rem;">${pct.toFixed(1)}%</span></td>
+      </tr>`;
+    }).join('');
+
+    /* Last-updated timestamp */
+    const el = $('att-last-updated');
+    if (el) el.textContent = 'updated ' + new Date().toLocaleTimeString();
+  }
+
+  /* ── Socket.IO connection ─────────────────────────────────────────────── */
+
+  let _socket = null;
+  let _pollTimer = null;
+
+  function _requestUpdate() {
+    if (_socket?.connected) _socket.emit('get_attendance', {});
+  }
+
+  function _connect() {
+    _socket = io({ transports: ['websocket', 'polling'] });
+
+    _socket.on('connect', () => {
+      _setBadge(true);
+      _requestUpdate();             // immediate refresh on connect
+      _pollTimer = setInterval(_requestUpdate, POLL_INTERVAL_MS);
+    });
+
+    _socket.on('disconnect', () => {
+      _setBadge(false);
+      clearInterval(_pollTimer);
+    });
+
+    _socket.on('attendance_update', data => {
+      _renderCard(data);
+    });
+
+    /* ── Alert events ───────────────────────────────────────────────────── */
+    _socket.on('alert', alertData => {
+      _prependAlertRow(alertData);
+      _showAlertToast(alertData);
+      _updateAlertBadge();
+    });
+
+    _socket.on('alert_ack', (alert) => {
+      // alert is the full updated alert dict (includes acked_by, acked_at)
+      const row = document.getElementById(`alert-row-${alert.id}`);
+      if (row) {
+        const cell = row.querySelector('.ack-cell');
+        if (cell) cell.innerHTML = _ackStatusCell(alert);
+        row.style.opacity = '0.55';
+      }
+      _updateAlertBadge();
+    });
+
+    /* Reconnect on error (Socket.IO auto-reconnects, but just in case) */
+    _socket.on('connect_error', () => _setBadge(false));
+  }
+
+    /* ── Alert helpers ──────────────────────────────────────────────────────── */
+
+  let _unackedAlerts = 0;
+  let _ackTargetId   = null; // alert id pending acknowledgement in modal
+
+  function _alertTypeBadge(type) {
+    const map = {
+      forced_entry: ['alert-severity-forced',  'Forced Entry'],
+      tailgate:     ['alert-severity-tailgate', 'Tailgate'],
+      safety_alert: ['alert-severity-forced',  'Safety · High'],
+    };
+    const [cls, label] = map[type] || ['alert-severity-other', type];
+    return `<span class="alert-sev-pill ${cls}">${label}</span>`;
+  }
+
+  function _fmtTs(iso) {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleTimeString(); } catch { return iso; }
+  }
+
+  function _camSnapshotCell(camera_id) {
+    if (!camera_id) {
+      return '<div class="alert-cam-placeholder"><i class="bi bi-camera-slash"></i></div>';
+    }
+    // Try to load snapshot; fall back to placeholder on error
+    return `<img class="alert-cam-thumb" alt="${camera_id}"
+                 src="/api/camera/${encodeURIComponent(camera_id)}/snapshot"
+                 onerror="this.outerHTML='<div class=\'alert-cam-placeholder\'><i class=\'bi bi-camera-slash\'></i></div>'">`;
+  }
+
+  function _ackStatusCell(alert) {
+    if (alert.acknowledged) {
+      const who = alert.acked_by ? `<div>${alert.acked_by}</div>` : '';
+      const when = alert.acked_at ? `<div style="font-size:.68rem;">${_fmtTs(alert.acked_at)}</div>` : '';
+      return `<span class="ack-audit"><i class="bi bi-check2-circle text-success me-1"></i>${who}${when}</span>`;
+    }
+    return `<button class="btn btn-sm" style="font-size:.7rem;padding:.15rem .5rem;
+                background:var(--pcs-border);color:var(--pcs-muted);border:none;"
+            onclick="_openAckModal(${alert.id})">Acknowledge</button>`;
+  }
+
+  function _prependAlertRow(alert) {
+    const tbody = document.getElementById('alert-tbody');
+    if (!tbody) return;
+    const empty = document.getElementById('alert-empty-row');
+    if (empty) empty.remove();
+
+    const acked = alert.acknowledged;
+    const tr = document.createElement('tr');
+    tr.id = `alert-row-${alert.id}`;
+    if (acked) tr.style.opacity = '0.55';
+    tr.innerHTML = `
+      <td style="padding:.5rem 1rem;vertical-align:middle;">${_alertTypeBadge(alert.alert_type)}</td>
+      <td style="padding:.4rem .75rem;vertical-align:middle;">${_camSnapshotCell(alert.camera_id)}</td>
+      <td style="padding:.5rem .75rem;vertical-align:middle;font-family:var(--pcs-mono);font-size:.78rem;">${alert.door_id ?? '—'}</td>
+      <td style="padding:.5rem .75rem;vertical-align:middle;font-size:.78rem;">${alert.camera_id ?? '—'}</td>
+      <td style="padding:.5rem .75rem;vertical-align:middle;font-family:var(--pcs-mono);font-size:.73rem;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${alert.subject_key ?? ''}">${alert.subject_key ?? '—'}</td>
+      <td style="padding:.5rem .75rem;vertical-align:middle;font-size:.78rem;color:var(--pcs-muted);">${_fmtTs(alert.timestamp_utc)}</td>
+      <td style="padding:.5rem .75rem;vertical-align:middle;font-size:.78rem;text-align:right;">${alert.confidence != null ? (alert.confidence * 100).toFixed(0) + '%' : '—'}</td>
+      <td class="ack-cell" style="padding:.5rem .75rem;vertical-align:middle;">${_ackStatusCell(alert)}</td>`;
+    tbody.insertBefore(tr, tbody.firstChild);
+    if (!acked) _unackedAlerts++;
+  }
+
+  function _showAlertToast(alert) {
+    const container = document.getElementById('alert-toast-container');
+    if (!container) return;
+    const toastMap = {
+      forced_entry: ['#ef4444', 'bi-door-open-fill', 'Forced Entry'],
+      tailgate:     ['#f59e0b', 'bi-people-fill',    'Tailgate'],
+      safety_alert: ['#ef4444', 'bi-fire',           'Safety Alert · High'],
+    };
+    const [color, icon, label] = toastMap[alert.alert_type] || ['#94a3b8', 'bi-exclamation-triangle', 'Alert'];
+    const div = document.createElement('div');
+    div.className = 'toast align-items-center show';
+    div.setAttribute('role', 'alert');
+    div.style.cssText = `background:var(--pcs-surface);border:1px solid ${color};border-left:4px solid ${color};min-width:280px;max-width:340px;`;
+    div.innerHTML = `
+      <div class="d-flex">
+        <div class="toast-body" style="color:var(--pcs-text);padding:.75rem 1rem;">
+          <div style="font-weight:700;color:${color};font-size:.85rem;margin-bottom:.25rem;">
+            <i class="bi ${icon} me-1"></i>${label} – Door ${alert.door_id ?? '?'}
+          </div>
+          <div style="font-size:.78rem;color:var(--pcs-muted);">
+            ${alert.camera_id ? 'Camera: ' + alert.camera_id + ' · ' : ''}${_fmtTs(alert.timestamp_utc)}
+          </div>
+          ${alert.subject_key ? `<div style="font-size:.72rem;color:var(--pcs-muted);font-family:var(--pcs-mono);margin-top:.2rem;">${alert.subject_key.slice(0,32)}…</div>` : ''}
+          <button class="btn btn-sm mt-1" style="font-size:.7rem;padding:.1rem .4rem;background:var(--pcs-border);color:var(--pcs-muted);border:none;"
+                  onclick="_openAckModal(${alert.id}); this.closest('.toast').remove();">Acknowledge</button>
+        </div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto" aria-label="Close"
+                onclick="this.closest('.toast').remove()"></button>
+      </div>`;
+    container.appendChild(div);
+    setTimeout(() => { if (div.parentNode) div.remove(); }, 10000);
+  }
+
+  function _updateAlertBadge() {
+    fetch('/api/alerts?unacked_only=1&n=1')
+      .then(r => r.json())
+      .then(d => {
+        const count = d.total_unacked ?? 0;
+        const badge = document.getElementById('alert-badge');
+        const label = document.getElementById('alert-unacked-label');
+        if (badge) { badge.textContent = count; badge.style.display = count > 0 ? 'inline-block' : 'none'; }
+        if (label) { label.textContent = `${count} unacked`; label.style.display = count > 0 ? 'inline' : 'none'; }
+      }).catch(() => {});
+  }
+
+  /* ── Ack modal ──────────────────────────────────────────────────────────── */
+
+  let _ackModal = null;
+  function _ensureAckModal() {
+    if (!_ackModal) {
+      const el = document.getElementById('ackModal');
+      if (el) _ackModal = new bootstrap.Modal(el);
+    }
+    return _ackModal;
+  }
+
+  function _openAckModal(alertId) {
+    _ackTargetId = alertId;
+    const input = document.getElementById('ack-operator-input');
+    if (input) { input.value = ''; input.focus(); }
+    const m = _ensureAckModal();
+    if (m) m.show();
+  }
+
+  async function _ackAlert(id, acked_by) {
+    try {
+      const body = acked_by ? JSON.stringify({ acked_by }) : '{}';
+      await fetch(`/api/alerts/${id}/ack`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+      // UI update handled by the alert_ack socket event
+    } catch { /* ignore */ }
+  }
+
+  // Wire submit button once DOM is ready
+  document.addEventListener('DOMContentLoaded', () => {
+    const submitBtn = document.getElementById('ack-submit-btn');
+    if (submitBtn) {
+      submitBtn.addEventListener('click', () => {
+        const operator = (document.getElementById('ack-operator-input')?.value || '').trim();
+        const m = _ensureAckModal();
+        if (m) m.hide();
+        if (_ackTargetId != null) { _ackAlert(_ackTargetId, operator || null); _ackTargetId = null; }
+      });
+    }
+    // Also allow Enter key in the operator input
+    const inp = document.getElementById('ack-operator-input');
+    if (inp) {
+      inp.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('ack-submit-btn')?.click(); });
+    }
+  });
+
+  /* Load existing alerts on page load (with filter support) */
+  async function _loadAlerts() {
+    const type   = document.getElementById('alert-filter-type')?.value  || '';
+    const unacked = document.getElementById('alert-filter-ack')?.value  || '';
+    let url = '/api/alerts?n=50';
+    if (type)   url += `&alert_type=${encodeURIComponent(type)}`;
+    if (unacked) url += `&unacked_only=${unacked}`;
+    try {
+      const r = await fetch(url);
+      const d = await r.json();
+      // Clear current rows
+      const tbody = document.getElementById('alert-tbody');
+      if (tbody) tbody.innerHTML = `
+        <tr id="alert-empty-row"><td colspan="8" style="text-align:center;color:var(--pcs-muted);padding:1.5rem;font-size:.83rem;">
+          <i class="bi bi-check-circle me-1"></i>No alerts</td></tr>`;
+      _unackedAlerts = 0;
+      if (d.alerts && d.alerts.length > 0) {
+        d.alerts.slice().reverse().forEach(_prependAlertRow);
+      }
+      _updateAlertBadge();
+    } catch { /* ignore */ }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _loadAlerts);
+  } else {
+    _loadAlerts();
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     LEFT-OBJECT MODULE
+     ══════════════════════════════════════════════════════════════ */
+
+  /* Render a thumbnail cell — shows snapshot or a grey placeholder */
+  function _loThumbCell(ev) {
+    if (ev.snapshot_b64) {
+      return `<img src="${ev.snapshot_b64}" alt="snapshot" class="lo-thumb" loading="lazy">`;
+    }
+    return `<div class="lo-thumb-placeholder"><i class="bi bi-image" style="font-size:1.2rem;"></i></div>`;
+  }
+
+  /* Status badge text */
+  function _loBadge(ev) {
+    if (ev.confirmed)  return `<span class="lo-status-threat"><i class="bi bi-exclamation-triangle-fill me-1"></i>Threat</span>`;
+    if (ev.dismissed)  return `<span class="lo-status-removed"><i class="bi bi-check-circle-fill me-1"></i>Removed</span>`;
+    return `<span class="lo-status-active"><i class="bi bi-exclamation-circle-fill me-1"></i>Active</span>`;
+  }
+
+  /* Action buttons (disabled when already actioned) */
+  function _loActions(ev) {
+    const done = ev.confirmed || ev.dismissed;
+    const removeBtn  = `<button class="btn btn-sm btn-lo-remove"  onclick="_loRemove(${ev.id})"
+      style="background:#1e3a2e;color:var(--pcs-green);border:1px solid #1e3a2e;font-size:.72rem;padding:.18rem .55rem;"
+      ${done ? 'disabled' : ''} title="Mark removed / resolved">
+      <i class="bi bi-trash3"></i> Remove</button>`;
+    const confirmBtn = `<button class="btn btn-sm btn-lo-confirm" onclick="_loConfirm(${ev.id})"
+      style="background:#3b1a1a;color:#ef4444;border:1px solid #3b1a1a;font-size:.72rem;padding:.18rem .55rem;"
+      ${done ? 'disabled' : ''} title="Confirm as security threat">
+      <i class="bi bi-shield-exclamation"></i> Threat</button>`;
+    return `<div class="d-flex gap-1 justify-content-center">${removeBtn}${confirmBtn}</div>`;
+  }
+
+  /* Format bbox [x,y,w,h] */
+  function _loBboxText(ev) {
+    const b = ev.bbox || [];
+    return b.length === 4 ? `${b[0]},${b[1]},${b[2]},${b[3]}` : '—';
+  }
+
+  /* Format UTC timestamp → local short */
+  function _loFmtTime(utcStr) {
+    if (!utcStr) return '—';
+    try {
+      const d = new Date(utcStr.replace(' ', 'T') + 'Z');
+      return d.toLocaleString(undefined, {month:'short', day:'numeric',
+        hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    } catch { return utcStr; }
+  }
+
+  /* Insert one row at the top of the lo-tbody */
+  function _prependLORow(ev) {
+    const tbody = document.getElementById('lo-tbody');
+    if (!tbody) return;
+    const empty = document.getElementById('lo-empty-row');
+    if (empty) empty.remove();
+    const tr = document.createElement('tr');
+    tr.id = `lo-row-${ev.id}`;
+    tr.style.cssText = 'border-bottom:1px solid var(--pcs-border);';
+    tr.innerHTML = `
+      <td style="padding:.5rem 1rem;">${_loThumbCell(ev)}</td>
+      <td style="padding:.5rem .75rem;color:var(--pcs-text);font-family:monospace;">${ev.camera_id || '—'}</td>
+      <td style="padding:.5rem .75rem;color:var(--pcs-muted);font-family:monospace;font-size:.75rem;">${_loBboxText(ev)}</td>
+      <td style="padding:.5rem .75rem;color:var(--pcs-muted);">${_loFmtTime(ev.first_seen_utc)}</td>
+      <td style="padding:.5rem .75rem;text-align:right;color:var(--pcs-muted);">${(ev.dwell_s || 0).toFixed(0)}s</td>
+      <td id="lo-status-${ev.id}" style="padding:.5rem .75rem;text-align:center;">${_loBadge(ev)}</td>
+      <td id="lo-actions-${ev.id}" style="padding:.5rem .75rem;text-align:center;">${_loActions(ev)}</td>`;
+    tbody.prepend(tr);
+  }
+
+  /* Update the active-count badge in the section header */
+  async function _updateLOBadge() {
+    try {
+      const r = await fetch('/api/left-objects?n=1&dismissed=false&confirmed=false');
+      const d = await r.json();
+      const badge = document.getElementById('lo-active-badge');
+      if (!badge) return;
+      // list_recent with dismissed=false, confirmed=false gives active events
+      // Re-fetch count via count_active from the store via a lightweight query
+      const countR = await fetch('/api/left-objects?n=200&dismissed=false&confirmed=false');
+      const countD = await countR.json();
+      const cnt = (countD.events || []).length;
+      badge.textContent = `${cnt} active`;
+      badge.style.display = cnt > 0 ? '' : 'none';
+    } catch { /* ignore */ }
+  }
+
+  /* Dismiss a left-object event */
+  async function _loRemove(id) {
+    try {
+      const r = await fetch(`/api/left-objects/${id}/remove`, {method: 'POST',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action_by: 'operator'})});
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+    } catch (e) { console.warn('_loRemove failed:', e); }
+  }
+
+  /* Confirm a left-object event as a security threat */
+  async function _loConfirm(id) {
+    try {
+      const r = await fetch(`/api/left-objects/${id}/confirm`, {method: 'POST',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action_by: 'operator'})});
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+    } catch (e) { console.warn('_loConfirm failed:', e); }
+  }
+
+  /* Load / refresh the left-object table with current filter values */
+  async function _loadLeftObjects() {
+    const cam    = (document.getElementById('lo-filter-camera')?.value  || '').trim();
+    const status = document.getElementById('lo-filter-status')?.value  || '';
+    let url = '/api/left-objects?n=50';
+    if (cam) url += `&camera_id=${encodeURIComponent(cam)}`;
+    if (status === 'active')  { url += '&dismissed=false&confirmed=false'; }
+    if (status === 'removed') { url += '&dismissed=true'; }
+    if (status === 'threat')  { url += '&confirmed=true'; }
+    try {
+      const r = await fetch(url);
+      const d = await r.json();
+      const tbody = document.getElementById('lo-tbody');
+      if (!tbody) return;
+      tbody.innerHTML = `<tr id="lo-empty-row">
+        <td colspan="7" style="text-align:center;color:var(--pcs-muted);padding:1.5rem;font-size:.83rem;">
+          <i class="bi bi-check-circle me-1"></i>No left-object events</td></tr>`;
+      if (d.events && d.events.length > 0) {
+        d.events.slice().reverse().forEach(_prependLORow);
+      }
+      _updateLOBadge();
+    } catch { /* ignore */ }
+  }
+
+  /* Inject a synthetic left-object event for manual testing */
+  async function _loTrigger() {
+    // pick the first camera in the registry, or prompt
+    let camId = '';
+    const camItems = document.querySelectorAll('[data-cam-id]');
+    if (camItems.length > 0) {
+      camId = camItems[0].getAttribute('data-cam-id');
+    } else {
+      camId = prompt('Camera ID for test event:', 'gate-north') || 'gate-north';
+    }
+    try {
+      await fetch('/api/left-objects/trigger', {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({camera_id: camId, dwell_s: 45})});
+    } catch (e) { console.warn('_loTrigger failed:', e); }
+  }
+
+  /* Socket.IO: new left-object detected */
+  _socket.on('left_object', function(ev) {
+    _prependLORow(ev);
+    _updateLOBadge();
+    // Toast notification
+    const toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;background:var(--pcs-surface);'+
+      'border:1px solid #f59e0b;border-radius:8px;padding:.75rem 1.1rem;color:var(--pcs-text);'+
+      'font-size:.82rem;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.5);max-width:320px;';
+    toast.innerHTML = `<div style="font-weight:600;color:#f59e0b;margin-bottom:.25rem;">
+      <i class="bi bi-bag-x-fill me-1"></i>Left Object Detected</div>
+      <div>Camera: <strong>${ev.camera_id || '—'}</strong></div>
+      <div style="color:var(--pcs-muted);font-size:.75rem;">Dwell: ${(ev.dwell_s||0).toFixed(0)}s</div>`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 5000);
+  });
+
+  /* Socket.IO: left-object event updated (remove / confirm) */
+  _socket.on('left_object_update', function(ev) {
+    const statusCell  = document.getElementById(`lo-status-${ev.id}`);
+    const actionsCell = document.getElementById(`lo-actions-${ev.id}`);
+    if (statusCell)  statusCell.innerHTML  = _loBadge(ev);
+    if (actionsCell) actionsCell.innerHTML = _loActions(ev);
+    _updateLOBadge();
+  });
+
+  /* Auto-load left-object events when page is ready */
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _loadLeftObjects);
+  } else {
+    _loadLeftObjects();
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     LOITERING MODULE
+     ══════════════════════════════════════════════════════════════ */
+
+  /* Format a loitering event subject_key to a human-readable short label */
+  function _loiterSubjectLabel(ev) {
+    const key = ev.subject_key || '—';
+    // Show last 12 chars to keep it compact
+    return key.length > 14 ? '…' + key.slice(-12) : key;
+  }
+
+  /* Status badge */
+  function _loiterBadge(ev) {
+    if (ev.dismissed)
+      return `<span class="loiter-status-dismissed"><i class="bi bi-check-circle-fill me-1"></i>Dismissed</span>`;
+    return `<span class="loiter-status-active"><i class="bi bi-person-fill-exclamation me-1"></i>Active</span>`;
+  }
+
+  /* Dismiss button */
+  function _loiterActions(ev) {
+    const done = !!ev.dismissed;
+    return `<button class="btn btn-sm" onclick="_loiterDismiss(${ev.id})"
+      style="background:#1e3a2e;color:var(--pcs-green);border:1px solid #1e3a2e;font-size:.72rem;padding:.18rem .55rem;"
+      ${done ? 'disabled' : ''} title="Dismiss loitering alert">
+      <i class="bi bi-x-circle"></i> Dismiss</button>`;
+  }
+
+  /* Format UTC string */
+  function _loiterFmtTime(utcStr) {
+    if (!utcStr) return '—';
+    try {
+      const d = new Date(utcStr.replace(' ', 'T') + (utcStr.includes('+') ? '' : 'Z'));
+      return d.toLocaleString(undefined, {month:'short', day:'numeric',
+        hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    } catch { return utcStr; }
+  }
+
+  /* Insert one row at top of #loiter-tbody */
+  function _prependLoiterRow(ev) {
+    const tbody = document.getElementById('loiter-tbody');
+    if (!tbody) return;
+    const empty = document.getElementById('loiter-empty-row');
+    if (empty) empty.remove();
+    const tr = document.createElement('tr');
+    tr.id = `loiter-row-${ev.id}`;
+    tr.style.cssText = 'border-bottom:1px solid var(--pcs-border);';
+    tr.innerHTML = `
+      <td style="padding:.5rem 1rem;color:var(--pcs-text);font-family:monospace;">${ev.camera_id || '—'}</td>
+      <td style="padding:.5rem .75rem;color:var(--pcs-muted);font-family:monospace;font-size:.75rem;"
+          title="${ev.subject_key || ''}">${_loiterSubjectLabel(ev)}</td>
+      <td style="padding:.5rem .75rem;color:var(--pcs-muted);">${_loiterFmtTime(ev.first_seen_utc)}</td>
+      <td style="padding:.5rem .75rem;color:var(--pcs-muted);">${_loiterFmtTime(ev.detected_utc)}</td>
+      <td style="padding:.5rem .75rem;text-align:right;color:var(--pcs-muted);">${(ev.dwell_s || 0).toFixed(0)}s</td>
+      <td id="loiter-status-${ev.id}" style="padding:.5rem .75rem;text-align:center;">${_loiterBadge(ev)}</td>
+      <td id="loiter-actions-${ev.id}" style="padding:.5rem .75rem;text-align:center;">${_loiterActions(ev)}</td>`;
+    tbody.prepend(tr);
+  }
+
+  /* Update active-count badge */
+  async function _updateLoiterBadge() {
+    try {
+      const r   = await fetch('/api/loitering?n=200&dismissed=false');
+      const d   = await r.json();
+      const cnt = (d.events || []).length;
+      const badge = document.getElementById('loiter-active-badge');
+      if (!badge) return;
+      badge.textContent = `${cnt} active`;
+      badge.style.display = cnt > 0 ? '' : 'none';
+    } catch { /* ignore */ }
+  }
+
+  /* Dismiss a loitering event */
+  async function _loiterDismiss(id) {
+    try {
+      const r = await fetch(`/api/loitering/${id}/dismiss`, {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action_by: 'operator'})});
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+    } catch (e) { console.warn('_loiterDismiss failed:', e); }
+  }
+
+  /* Load / refresh the loitering table */
+  async function _loadLoitering() {
+    const cam     = (document.getElementById('loiter-filter-camera')?.value  || '').trim();
+    const subject = (document.getElementById('loiter-filter-subject')?.value || '').trim();
+    const status  = document.getElementById('loiter-filter-status')?.value  || '';
+    let url = '/api/loitering?n=50';
+    if (cam)     url += `&camera_id=${encodeURIComponent(cam)}`;
+    if (subject) url += `&subject_key=${encodeURIComponent(subject)}`;
+    if (status === 'active')    url += '&dismissed=false';
+    if (status === 'dismissed') url += '&dismissed=true';
+    try {
+      const r = await fetch(url);
+      const d = await r.json();
+      const tbody = document.getElementById('loiter-tbody');
+      if (!tbody) return;
+      tbody.innerHTML = `<tr id="loiter-empty-row">
+        <td colspan="7" style="text-align:center;color:var(--pcs-muted);padding:1.5rem;font-size:.83rem;">
+          <i class="bi bi-check-circle me-1"></i>No loitering events</td></tr>`;
+      if (d.events && d.events.length > 0) {
+        d.events.slice().reverse().forEach(_prependLoiterRow);
+      }
+      _updateLoiterBadge();
+    } catch { /* ignore */ }
+  }
+
+  /* Inject a synthetic loitering event for manual testing */
+  async function _loiterTrigger() {
+    let camId = '';
+    const camItems = document.querySelectorAll('[data-cam-id]');
+    if (camItems.length > 0) {
+      camId = camItems[0].getAttribute('data-cam-id');
+    } else {
+      camId = prompt('Camera ID for loitering test:', 'gate-north') || 'gate-north';
+    }
+    try {
+      await fetch('/api/loitering/trigger', {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({camera_id: camId, dwell_s: 65})});
+    } catch (e) { console.warn('_loiterTrigger failed:', e); }
+  }
+
+  /* Socket.IO: new loitering event detected */
+  _socket.on('loitering', function(ev) {
+    _prependLoiterRow(ev);
+    _updateLoiterBadge();
+    // Toast notification
+    const toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;background:var(--pcs-surface);'+
+      'border:1px solid #ef4444;border-radius:8px;padding:.75rem 1.1rem;color:var(--pcs-text);'+
+      'font-size:.82rem;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.5);max-width:320px;';
+    toast.innerHTML = `<div style="font-weight:600;color:#ef4444;margin-bottom:.25rem;">
+      <i class="bi bi-person-fill-exclamation me-1"></i>Loitering Detected</div>
+      <div>Camera: <strong>${ev.camera_id || '—'}</strong></div>
+      <div style="color:var(--pcs-muted);font-size:.75rem;">Dwell: ${(ev.dwell_s||0).toFixed(0)}s · ${_loiterSubjectLabel(ev)}</div>`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 6000);
+  });
+
+  /* Socket.IO: loitering event dismissed */
+  _socket.on('loitering_update', function(ev) {
+    const statusCell  = document.getElementById(`loiter-status-${ev.id}`);
+    const actionsCell = document.getElementById(`loiter-actions-${ev.id}`);
+    if (statusCell)  statusCell.innerHTML  = _loiterBadge(ev);
+    if (actionsCell) actionsCell.innerHTML = _loiterActions(ev);
+    _updateLoiterBadge();
+  });
+
+  /* Auto-load loitering events when page is ready */
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _loadLoitering);
+  } else {
+    _loadLoitering();
+  }
+
+}());
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CAMERA MONITOR
+   Lazy-loads JPEG thumbnails from /api/camera/<id>/snapshot, overlays
+   the top-3 recent events (verify match/nomatch + alert chips), shows a
+   similarity progress bar from the most recent face-verify result, and
+   exposes a Bootstrap tooltip with the last-seen timestamp on hover.
+   Refreshes every 5 s; individual cards also update on socket.io
+   camera_update events so the status dot changes without a full reload.
+   ═══════════════════════════════════════════════════════════════════════ */
+const _camMonitor = (function () {
+  const REFRESH_MS = 5000;
+  let _cams   = [];   // [{camera_id, name, door_id, …}]
+  let _status = {};   // camera_id → {status, last_seen, recent_events, last_similarity, last_matched}
+  let _timer  = null;
+
+  function _sc(s) {
+    return s === 'alert' ? 'status-alert' : s === 'activity' ? 'status-activity' : 'status-idle';
+  }
+  function _statusLabel(s) {
+    if (s === 'alert')    return '<span style="color:var(--pcs-red);font-weight:700;font-size:.67rem;">&#9679; ALERT</span>';
+    if (s === 'activity') return '<span style="color:var(--pcs-amber);font-size:.67rem;">&#9679; active</span>';
+    return '<span style="color:var(--pcs-green);opacity:.7;font-size:.67rem;">&#9679; idle</span>';
+  }
+  function _chip(ev) {
+    if (ev.type === 'alert') {
+      const lbl = (ev.alert_type || 'alert').replace(/_/g, ' ');
+      return `<span class="cam-event-chip alert-chip"><i class="bi bi-exclamation-triangle-fill"></i> ${lbl}</span>`;
+    }
+    if (ev.type === 'verify') {
+      const cls = ev.matched ? 'verify-match' : 'verify-nomatch';
+      const ico = ev.matched ? 'check-circle-fill' : 'x-circle-fill';
+      const sim = typeof ev.similarity === 'number' ? ` ${(ev.similarity * 100).toFixed(0)}%` : '';
+      return `<span class="cam-event-chip ${cls}"><i class="bi bi-${ico}"></i> verify${sim}</span>`;
+    }
+    return `<span class="cam-event-chip verify-nomatch">${ev.type}</span>`;
+  }
+  function _simBar(snap) {
+    if (!snap || snap.last_similarity == null) return '';
+    const pct   = Math.max(0, Math.min(100, ((snap.last_similarity + 1) / 2) * 100));
+    const color = snap.last_matched ? 'var(--pcs-green)' : 'var(--pcs-red)';
+    const label = (snap.last_similarity * 100).toFixed(1) + '%';
+    return `<div class="cam-sim-wrap">
+      <div class="cam-sim-track"><div class="cam-sim-fill" style="width:${pct.toFixed(1)}%;background:${color};"></div></div>
+      <span class="cam-sim-val">${label}</span></div>`;
+  }
+  function _lastSeenLabel(snap) {
+    if (!snap || !snap.last_seen) return 'No activity yet';
+    try { return 'Last seen: ' + new Date(snap.last_seen).toLocaleTimeString(); }
+    catch { return snap.last_seen; }
+  }
+  function _buildCard(cam, snap) {
+    const evs = (snap && snap.recent_events) ? snap.recent_events.slice(-3).reverse() : [];
+    const ts  = `${Date.now()}`;
+    return `
+      <div class="cam-monitor-card ${_sc(snap ? snap.status : 'idle')}"
+           id="cam-card-${cam.camera_id}"
+           data-camera-id="${cam.camera_id}"
+           data-bs-toggle="tooltip" data-bs-placement="top"
+           title="${_lastSeenLabel(snap)}">
+        <div class="cam-thumb-wrap">
+          <div class="cam-thumb-status-stripe"></div>
+          <img class="cam-thumb-img" alt="${cam.name}" loading="lazy"
+               src="/api/camera/${encodeURIComponent(cam.camera_id)}/snapshot?_t=${ts}"
+               onload="this.style.opacity=1;"
+               onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+          <div class="cam-thumb-placeholder" style="display:none;"><i class="bi bi-camera-video-off"></i></div>
+          <div class="cam-events-overlay">${evs.map(_chip).join('')}</div>
+        </div>
+        <div class="cam-monitor-footer">
+          <div class="d-flex align-items-center justify-content-between gap-1">
+            <div class="cam-monitor-name" title="${cam.name}">${cam.name}</div>
+            <div class="cam-status-label">${snap ? _statusLabel(snap.status) : ''}</div>
+          </div>
+          <div class="cam-monitor-sub">${cam.camera_id}${cam.door_id ? ' &middot; ' + cam.door_id : ''}</div>
+          ${_simBar(snap)}
+        </div>
+      </div>`;
+  }
+  function _updateCard(camId) {
+    const card = document.getElementById('cam-card-' + camId);
+    if (!card) return;
+    const cam  = _cams.find(c => c.camera_id === camId);
+    const snap = _status[camId];
+    if (!cam || !snap) return;
+
+    // Status class
+    card.className = 'cam-monitor-card ' + _sc(snap.status);
+
+    // Status label in footer
+    const lbl = card.querySelector('.cam-status-label');
+    if (lbl) lbl.innerHTML = _statusLabel(snap.status);
+
+    // Event chips
+    const overlay = card.querySelector('.cam-events-overlay');
+    if (overlay) {
+      const evs = (snap.recent_events || []).slice(-3).reverse();
+      overlay.innerHTML = evs.map(_chip).join('');
+    }
+
+    // Similarity bar — update or insert
+    const footer = card.querySelector('.cam-monitor-footer');
+    if (footer) {
+      const existing = footer.querySelector('.cam-sim-wrap');
+      const newHtml  = _simBar(snap);
+      if (newHtml) {
+        if (existing) existing.outerHTML = newHtml;
+        else          footer.insertAdjacentHTML('beforeend', newHtml);
+      } else if (existing) {
+        existing.remove();
+      }
+    }
+
+    // Refresh JPEG thumbnail (cache-busted)
+    const img = card.querySelector('.cam-thumb-img');
+    if (img) {
+      const ph = card.querySelector('.cam-thumb-placeholder');
+      img.style.display = '';
+      img.style.opacity = '0';
+      if (ph) ph.style.display = 'none';
+      img.src = `/api/camera/${encodeURIComponent(camId)}/snapshot?_t=${Date.now()}`;
+    }
+
+    // Refresh Bootstrap tooltip
+    const tt = bootstrap.Tooltip.getInstance(card);
+    if (tt) {
+      card.setAttribute('data-bs-original-title', _lastSeenLabel(snap));
+      card.title = '';
+    } else {
+      card.title = _lastSeenLabel(snap);
+    }
+  }
+
+  async function _fetchStatus() {
+    try {
+      const r = await fetch('/api/camera/status');
+      if (r.ok) _status = await r.json();
+    } catch {}
+  }
+
+  async function refresh() {
+    await _fetchStatus();
+    // Fetch camera list once
+    if (_cams.length === 0) {
+      try {
+        const r = await fetch('/api/cameras');
+        if (r.ok) { const d = await r.json(); _cams = d.cameras || []; }
+      } catch {}
+    }
+    const grid = document.getElementById('cam-monitor-grid');
+    if (!grid) return;
+
+    if (_cams.length === 0) {
+      grid.innerHTML = '<div style="color:var(--pcs-muted);font-size:.82rem;padding:.5rem;">'
+        + '<i class="bi bi-camera-video-off me-1"></i>No cameras in cameras.yaml.</div>';
+      return;
+    }
+
+    if (!grid.querySelector('.cam-monitor-card')) {
+      // First render — build entire grid
+      grid.innerHTML = _cams.map(c => _buildCard(c, _status[c.camera_id])).join('');
+      // Activate Bootstrap tooltips
+      grid.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el =>
+        new bootstrap.Tooltip(el, {trigger: 'hover'})
+      );
+    } else {
+      // Subsequent refresh — update each card in-place
+      _cams.forEach(c => _updateCard(c.camera_id));
+    }
+  }
+
+  function start() { refresh(); _timer = setInterval(refresh, REFRESH_MS); }
+
+  // React to real-time socket.io camera_update events
+  if (typeof _socket !== 'undefined') {
+    _socket.on('camera_update', function (data) {
+      if (!data || !data.camera_id) return;
+      _status[data.camera_id] = Object.assign(_status[data.camera_id] || {}, {
+        status:     data.status,
+        last_event: data.last_event,
+        last_seen:  data.last_seen,
+      });
+      _updateCard(data.camera_id);
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+
+  return { refresh };
+}());
+</script>
+
+</body>
+</html>

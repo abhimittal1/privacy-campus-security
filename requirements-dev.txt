@@ -1,0 +1,24 @@
+# ── Testing ────────────────────────────────────────────────────────────────────
+pytest>=8.0
+pytest-cov>=5.0
+pytest-xdist>=3.5          # parallel test execution
+pytest-asyncio>=0.23       # async test support (used in integration tests)
+
+# ── Formatting ────────────────────────────────────────────────────────────────
+pytest-cov>=5.0
+black>=24.0
+isort>=5.13
+
+# ── Linting ────────────────────────────────────────────────────────────
+ruff>=0.4                  # fast linter (supersedes flake8 + bugbear + isort rules)
+flake8>=7.0
+flake8-bugbear>=24.0       # opinionated bug detection
+flake8-annotations>=3.0   # enforce type annotations
+
+# ── Type checking ───────────────────────────────────────────────────────
+mypy>=1.9
+types-requests             # stubs for requests
+types-tqdm                 # stubs for tqdm
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+pre-commit>=3.7            # git hooks for auto-lint on commit

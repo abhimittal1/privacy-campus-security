@@ -1,0 +1,54 @@
+# configs/proto.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Prototypical Network – default hyperparameters
+#
+# All values here are consumed by src/cli/run.py (train-protonet subcommand)
+# and mapped directly to src.models.prototypical.ProtoNetConfig.
+#
+# Usage:
+#   pcs train-protonet --config configs/proto.yaml
+#   pcs train-protonet --config configs/proto.yaml --device cuda
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Reproducibility ────────────────────────────────────────────────────────────
+seed: 42                         # PyTorch + sampler RNG seed
+
+# ── Episodic data parameters ──────────────────────────────────────────────────
+train_episodes: 200              # Episodes drawn per training epoch
+val_episodes: 100                # Episodes used for validation each epoch
+
+# ── ProtoNetConfig fields ─────────────────────────────────────────────────────
+protonet:
+  # Episode geometry
+  n_way: 5                       # Classes per episode (N-way)
+  k_shot: 5                      # Support images per class (K-shot)
+  q_query: 15                    # Query images per class
+
+  # Optimiser
+  optimizer: adam                # "adam" | "sgd"
+  learning_rate: 0.001           # Initial learning rate
+  weight_decay: 0.0001           # L2 regularisation coefficient
+
+  # Training duration
+  epochs: 50                     # Total meta-training epochs
+
+  # Hardware
+  device: cpu                    # Overridden by --device CLI flag if supplied
+
+  # Architecture
+  freeze_backbone: true          # Freeze ResNet-50 body; only project head trained
+                                 # Set to false to fine-tune the full network
+
+  # Persistence & logging
+  save_best: true                # Save best-val checkpoint automatically
+  log_interval: 10               # Log summary every N episodes within an epoch
+  log_file: null                 # Optional path for structured log output
+                                 # e.g. experiments/checkpoints/train.log
+
+# ── Notes ─────────────────────────────────────────────────────────────────────
+# * Increase n_way to 10 for harder tasks once the 5-way baseline is stable.
+# * Lower k_shot to 1 for 1-shot evaluation; the few-shot accuracy will drop
+#   significantly but the model should still generalize.
+# * Set freeze_backbone: false and lower learning_rate to 1e-4 for full
+#   fine-tuning with the ResNet-50 body unfrozen.
+# * For CUDA training add --device cuda when calling train-protonet.

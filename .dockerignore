@@ -1,0 +1,51 @@
+# ── Version control ───────────────────────────────────────────────────────────
+.git
+.gitignore
+
+# ── Virtual environment ───────────────────────────────────────────────────────
+.venv
+venv
+env
+
+# ── Python build artefacts ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ── Tests & CI ────────────────────────────────────────────────────────────────
+tests/
+conftest.py
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── Dev tooling config (not needed at runtime) ────────────────────────────────
+.pre-commit-config.yaml
+requirements-dev.txt
+Makefile
+.flake8
+.mypy_cache/
+.ruff_cache/
+
+# ── Data & experiment outputs (mounted as a volume instead) ──────────────────
+data/
+experiments/
+
+# ── Docs & notebooks ─────────────────────────────────────────────────────────
+docs/
+*.ipynb
+
+# ── IDE / OS files ────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+
+# ── Docker files themselves (no recursive copy) ───────────────────────────────
+Dockerfile
+docker-compose.yml
+.dockerignore

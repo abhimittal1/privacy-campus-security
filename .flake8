@@ -1,0 +1,22 @@
+[flake8]
+max-line-length = 100
+extend-ignore =
+    # Black compatibility: allow some formatting Black produces
+    E203,  # whitespace before ':'
+    W503,  # line break before binary operator
+    # Annotation enforcement relaxed for prototype
+    ANN101, ANN102, ANN204
+exclude =
+    .git,
+    __pycache__,
+    .venv,
+    dist,
+    build,
+    *.egg-info,
+    experiments/,
+    docs/
+per-file-ignores =
+    # Allow missing annotations in tests
+    tests/*: ANN
+    # Allow broad ** in CLI glue
+    src/cli/*: ANN

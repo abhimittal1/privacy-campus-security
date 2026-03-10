@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Campus Overview – PCS</title>
+
+  <!-- Bootstrap 5.3 -->
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+        crossorigin="anonymous" />
+  <!-- Bootstrap Icons 1.11 -->
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+        crossorigin="anonymous" />
+  <!-- Leaflet.js 1.9 -->
+  <link rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        crossorigin="" />
+
+  <style>
+    :root {
+      --pcs-bg:        #0f172a;
+      --pcs-surface:   #1e293b;
+      --pcs-border:    #334155;
+      --pcs-text:      #e2e8f0;
+      --pcs-muted:     #94a3b8;
+      --pcs-green:     #22c55e;
+      --pcs-amber:     #f59e0b;
+      --pcs-red:       #ef4444;
+      --pcs-blue:      #3b82f6;
+    }
+
+    html, body { height: 100%; margin: 0; background: var(--pcs-bg); color: var(--pcs-text); }
+
+    /* ── Top nav ── */
+    .pcs-nav {
+      background: var(--pcs-surface);
+      border-bottom: 1px solid var(--pcs-border);
+      padding: .6rem 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    .pcs-nav .brand { font-size: 1.15rem; font-weight: 700; color: var(--pcs-blue); letter-spacing: .03em; }
+    .pcs-nav .nav-link { color: var(--pcs-muted); font-size: .9rem; text-decoration: none; }
+    .pcs-nav .nav-link:hover, .pcs-nav .nav-link.active { color: var(--pcs-text); }
+    .pcs-nav .spacer { flex: 1; }
+
+    /* ── Layout ── */
+    .layout {
+      display: flex;
+      height: calc(100vh - 53px);
+    }
+
+    /* ── Map ── */
+    #map {
+      flex: 1;
+      background: #1a1f2e;
+    }
+
+    /* ── Side drawer ── */
+    #drawer {
+      width: 0;
+      overflow: hidden;
+      background: var(--pcs-surface);
+      border-left: 1px solid var(--pcs-border);
+      transition: width .25s ease;
+      display: flex;
+      flex-direction: column;
+    }
+    #drawer.open { width: 360px; }
+
+    .drawer-inner {
+      width: 360px;
+      padding: 1.1rem;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .drawer-close {
+      background: transparent;
+      border: none;
+      color: var(--pcs-muted);
+      font-size: 1.25rem;
+      cursor: pointer;
+      position: absolute;
+      top: .5rem;
+      right: .5rem;
+    }
+    .drawer-close:hover { color: var(--pcs-text); }
+
+    /* Status badge */
+    .status-badge {
+      display: inline-block;
+      padding: .2em .65em;
+      border-radius: 999px;
+      font-size: .78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    .badge-idle     { background: #14532d; color: var(--pcs-green); }
+    .badge-activity { background: #78350f; color: var(--pcs-amber); }
+    .badge-alert    { background: #7f1d1d; color: var(--pcs-red);   }
+
+    /* Drawer meta table */
+    .meta-table { font-size: .875rem; }
+    .meta-table td:first-child { color: var(--pcs-muted); padding-right: .75rem; white-space: nowrap; }
+
+    /* Events list in drawer */
+    .event-list { list-style: none; padding: 0; margin: 0; font-size: .82rem; }
+    .event-list li {
+      padding: .35rem .5rem;
+      border-bottom: 1px solid var(--pcs-border);
+      display: flex;
+      gap: .5rem;
+      align-items: baseline;
+    }
+    .event-list .evt-kind {
+      background: var(--pcs-border);
+      border-radius: 4px;
+      padding: .1em .4em;
+      font-size: .75rem;
+      white-space: nowrap;
+    }
+    .event-list .evt-ts { color: var(--pcs-muted); font-size: .73rem; margin-left: auto; white-space: nowrap; }
+
+    /* Leaflet custom marker */
+    .cam-marker-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: 2.5px solid rgba(255,255,255,.3);
+      box-shadow: 0 2px 6px rgba(0,0,0,.5);
+      transition: background .45s ease, box-shadow .45s ease;
+      cursor: pointer;
+    }
+    .cam-marker-wrap i { font-size: 1rem; color: #fff; }
+    .cam-marker-wrap.inactive { opacity: .45; }
+
+    /* Pulse ring for activity / alert */
+    @keyframes pulse-ring {
+      0%   { transform: scale(1);    opacity: .7; }
+      100% { transform: scale(1.8);  opacity: 0;  }
+    }
+    .cam-marker-wrap.pulsing::after {
+      content: "";
+      position: absolute;
+      width: 34px; height: 34px;
+      border-radius: 50%;
+      border: 2px solid currentColor;
+      animation: pulse-ring .9s ease-out infinite;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Navigation ──────────────────────────────── -->
+<nav class="pcs-nav">
+  <span class="brand"><i class="bi bi-shield-lock me-1"></i>PCS</span>
+  <a class="nav-link" href="/">Dashboard</a>
+  <a class="nav-link" href="/enroll/screen">Enroll</a>
+  <a class="nav-link active" href="/admin/campus">Campus Map</a>
+  <div class="spacer"></div>
+  <span id="conn-badge" class="badge text-bg-secondary">Connecting…</span>
+  <span class="text-muted small">{{ enrolled }} enrolled</span>
+</nav>
+
+<!-- ── Body layout ─────────────────────────────── -->
+<div class="layout">
+  <div id="map"></div>
+
+  <!-- Side drawer -->
+  <aside id="drawer" role="complementary" aria-label="Camera detail">
+    <div class="drawer-inner" id="drawer-inner">
+      <button class="drawer-close" id="drawer-close-btn" aria-label="Close panel">
+        <i class="bi bi-x-lg"></i>
+      </button>
+      <h2 class="fs-6 fw-bold mb-1 pe-4" id="d-name">—</h2>
+      <div class="mb-2" id="d-status-badge"></div>
+
+      <table class="meta-table mb-3 w-100">
+        <tr><td>Camera ID</td><td id="d-id">—</td></tr>
+        <tr><td>Door</td>     <td id="d-door">—</td></tr>
+        <tr><td>Coords</td>   <td id="d-coords">—</td></tr>
+        <tr><td>Frame topic</td><td id="d-frame-topic" class="font-monospace" style="font-size:.78rem">—</td></tr>
+        <tr><td>Sensor topic</td><td id="d-sensor-topic" class="font-monospace" style="font-size:.78rem">—</td></tr>
+        <tr><td>Last seen</td><td id="d-last-seen">—</td></tr>
+      </table>
+
+      <div class="d-flex gap-2 mb-3">
+        <a id="d-enroll-link" href="#" class="btn btn-sm btn-outline-success w-100">
+          <i class="bi bi-camera me-1"></i>Arm for Enroll
+        </a>
+      </div>
+
+      <h3 class="fs-6 fw-semibold mb-2">Recent Events</h3>
+      <ul class="event-list" id="d-events">
+        <li class="text-muted" style="font-size:.82rem">No events yet.</li>
+      </ul>
+    </div>
+  </aside>
+</div>
+
+<!-- ── Scripts ─────────────────────────────────── -->
+<!-- Leaflet -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<!-- Socket.IO -->
+<script src="https://cdn.jsdelivr.net/npm/socket.io@4.7.5/client-dist/socket.io.min.js"
+        crossorigin="anonymous"></script>
+<!-- Bootstrap JS (for tooltips) -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"
+        crossorigin="anonymous"></script>
+
+<script>
+/* ================================================================
+   Camera data injected by Jinja
+   ================================================================ */
+const CAMERAS = {{ cameras | tojson }};
+
+/* ================================================================
+   Leaflet map setup
+   ================================================================ */
+const map = L.map("map", {
+  center: [28.7041, 77.1025],
+  zoom: 17,
+  zoomControl: true,
+});
+
+// CartoDB dark tiles — no API key required
+L.tileLayer(
+  "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+  {
+    attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    subdomains: "abcd",
+    maxZoom: 20,
+  }
+).addTo(map);
+
+/* ================================================================
+   Status colour helpers
+   ================================================================ */
+const STATUS_COLOR = {
+  idle:     "#22c55e",
+  activity: "#f59e0b",
+  alert:    "#ef4444",
+};
+
+function statusBgColor(s) { return STATUS_COLOR[s] ?? STATUS_COLOR.idle; }
+
+function makeDivIcon(status, active) {
+  const bg    = statusBgColor(status);
+  const pulse = (status === "activity" || status === "alert") ? " pulsing" : "";
+  const dim   = active ? "" : " inactive";
+  return L.divIcon({
+    className: "",
+    iconSize:  [34, 34],
+    iconAnchor:[17, 17],
+    html: `<div class="cam-marker-wrap${pulse}${dim}"
+                style="background:${bg};color:${bg};"
+                title="">
+             <i class="bi bi-camera-video-fill"></i>
+           </div>`,
+  });
+}
+
+/* ================================================================
+   Build markers
+   ================================================================ */
+const markers = {};   // camera_id → Leaflet marker
+const camData  = {};  // camera_id → camera dict (mutable status)
+
+CAMERAS.forEach(cam => {
+  camData[cam.camera_id] = Object.assign({}, cam);
+
+  const marker = L.marker([cam.lat, cam.lon], {
+    icon: makeDivIcon(cam.status, cam.active),
+    title: cam.name,
+  }).addTo(map);
+
+  marker.on("click", () => openDrawer(cam.camera_id));
+  markers[cam.camera_id] = marker;
+});
+
+/* Fit map to all camera positions */
+if (CAMERAS.length > 0) {
+  const lats = CAMERAS.map(c => c.lat);
+  const lons = CAMERAS.map(c => c.lon);
+  map.fitBounds([
+    [Math.min(...lats) - 0.0003, Math.min(...lons) - 0.0003],
+    [Math.max(...lats) + 0.0003, Math.max(...lons) + 0.0003],
+  ]);
+}
+
+/* ================================================================
+   Drawer logic
+   ================================================================ */
+let activeCamera = null;
+
+function statusBadgeHtml(status) {
+  const cls = { idle: "badge-idle", activity: "badge-activity", alert: "badge-alert" };
+  const lbl = { idle: "Idle", activity: "Activity", alert: "Alert" };
+  return `<span class="status-badge ${cls[status] ?? "badge-idle"}">${lbl[status] ?? status}</span>`;
+}
+
+function fmtTs(iso) {
+  if (!iso) return "—";
+  try { return new Date(iso).toLocaleTimeString(); } catch { return iso; }
+}
+
+function openDrawer(cameraId) {
+  const cam = camData[cameraId];
+  if (!cam) return;
+  activeCamera = cameraId;
+
+  document.getElementById("d-name").textContent   = cam.name;
+  document.getElementById("d-id").textContent     = cam.camera_id;
+  document.getElementById("d-door").textContent   = cam.door_id ?? "—";
+  document.getElementById("d-coords").textContent = `${cam.lat.toFixed(5)}, ${cam.lon.toFixed(5)}`;
+  document.getElementById("d-frame-topic").textContent  = cam.frame_topic  ?? "—";
+  document.getElementById("d-sensor-topic").textContent = cam.sensor_topic ?? "—";
+  document.getElementById("d-last-seen").textContent    = fmtTs(cam.last_seen);
+  document.getElementById("d-status-badge").innerHTML   = statusBadgeHtml(cam.status);
+  document.getElementById("d-enroll-link").href = `/enroll/screen?camera=${encodeURIComponent(cameraId)}`;
+
+  refreshDrawerEvents(cameraId);
+
+  const drawer = document.getElementById("drawer");
+  drawer.classList.add("open");
+}
+
+function closeDrawer() {
+  document.getElementById("drawer").classList.remove("open");
+  activeCamera = null;
+}
+
+document.getElementById("drawer-close-btn").addEventListener("click", closeDrawer);
+
+async function refreshDrawerEvents(cameraId) {
+  const list = document.getElementById("d-events");
+  try {
+    const r = await fetch("/api/events?n=50");
+    const events = await r.json();
+    // Filter events that mention this camera
+    const camEvents = events.filter(e =>
+      e.meta && (e.meta.camera_id === cameraId || e.subject_id === cameraId)
+    ).slice(0, 12);
+
+    if (camEvents.length === 0) {
+      list.innerHTML = '<li class="text-muted" style="font-size:.82rem">No events for this camera.</li>';
+    } else {
+      list.innerHTML = camEvents.map(e => `
+        <li>
+          <span class="evt-kind">${e.kind}</span>
+          <span>${e.subject_id ?? "—"}</span>
+          <span class="evt-ts">${fmtTs(e.timestamp)}</span>
+        </li>`).join("");
+    }
+  } catch {
+    list.innerHTML = '<li class="text-muted">Could not load events.</li>';
+  }
+}
+
+/* ================================================================
+   Socket.IO  — live status updates
+   ================================================================ */
+const socket = io({ transports: ["websocket", "polling"] });
+
+const connBadge = document.getElementById("conn-badge");
+
+socket.on("connect", () => {
+  connBadge.className = "badge text-bg-success";
+  connBadge.textContent = "Live";
+});
+socket.on("disconnect", () => {
+  connBadge.className = "badge text-bg-danger";
+  connBadge.textContent = "Offline";
+});
+
+socket.on("camera_update", payload => {
+  const { camera_id, status, last_event, last_seen } = payload;
+  const cam = camData[camera_id];
+  if (!cam) return;
+
+  // Update local cache
+  cam.status     = status;
+  cam.last_seen  = last_seen;
+
+  // Update Leaflet marker icon
+  const marker = markers[camera_id];
+  if (marker) marker.setIcon(makeDivIcon(status, cam.active));
+
+  // If this camera is open in the drawer, refresh it
+  if (activeCamera === camera_id) {
+    document.getElementById("d-status-badge").innerHTML = statusBadgeHtml(status);
+    document.getElementById("d-last-seen").textContent  = fmtTs(last_seen);
+    refreshDrawerEvents(camera_id);
+  }
+});
+
+/* Also handle the legacy camera_status event for backward compat */
+socket.on("camera_status", payload => {
+  const { camera_id, armed } = payload;
+  const cam = camData[camera_id];
+  if (!cam) return;
+  const newStatus = armed ? "activity" : cam.status;
+  const marker = markers[camera_id];
+  if (marker) marker.setIcon(makeDivIcon(newStatus, cam.active));
+});
+
+/* ================================================================
+   Polling fallback — updates every 5 s
+   ================================================================ */
+async function pollStatus() {
+  try {
+    const r = await fetch("/api/camera/status");
+    const data = await r.json();
+    Object.entries(data).forEach(([cid, snap]) => {
+      const cam = camData[cid];
+      if (!cam) return;
+      const changed = cam.status !== snap.status;
+      cam.status    = snap.status;
+      cam.last_seen = snap.last_seen;
+      if (changed) {
+        const marker = markers[cid];
+        if (marker) marker.setIcon(makeDivIcon(snap.status, cam.active));
+        if (activeCamera === cid) {
+          document.getElementById("d-status-badge").innerHTML = statusBadgeHtml(snap.status);
+          document.getElementById("d-last-seen").textContent  = fmtTs(snap.last_seen);
+        }
+      }
+    });
+  } catch { /* ignore */ }
+}
+
+setInterval(pollStatus, 5000);
+</script>
+</body>
+</html>

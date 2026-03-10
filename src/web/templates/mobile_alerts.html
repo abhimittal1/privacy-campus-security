@@ -1,0 +1,977 @@
+<!doctype html>
+<!--
+  mobile_alerts.html – Privacy Campus Security · On-Call Admin Mobile View
+  ────────────────────────────────────────────────────────────────────────
+  Route : GET /alerts/mobile
+  Target: On-call security admins on phones / small screens
+  Features:
+    • Live alert feed (Socket.IO, no polling)
+    • One-tap Acknowledge per alert
+    • Navigate-to-camera (opens snapshot or campus map)
+    • Panic button → POST /api/alerts/panic (immediate SMS to on-call numbers)
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="theme-color" content="#080f1a"/>
+  <title>PCS · Mobile Alerts</title>
+
+  <style>
+    /* ── Design tokens ─────────────────────────────────────────────────── */
+    :root {
+      --bg:          #080f1a;
+      --surface:     #0f1d2e;
+      --surface-2:   #162233;
+      --border:      #1e3048;
+      --accent:      #0ea5e9;
+      --green:       #22c55e;
+      --amber:       #f59e0b;
+      --red:         #ef4444;
+      --red-deep:    #b91c1c;
+      --muted:       #64748b;
+      --text:        #e2e8f0;
+      --text-dim:    #94a3b8;
+      --radius:      12px;
+      --radius-sm:   8px;
+      --font:        system-ui, -apple-system, 'Segoe UI', sans-serif;
+    }
+
+    /* ── Reset & base ──────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 15px;
+      line-height: 1.5;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* ── App shell ─────────────────────────────────────────────────────── */
+    .app-shell {
+      display: flex;
+      flex-direction: column;
+      height: 100dvh;          /* dynamic viewport height – avoids iOS URL bar */
+      max-width: 520px;
+      margin: 0 auto;
+    }
+
+    /* ── Header ────────────────────────────────────────────────────────── */
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      gap: 8px;
+    }
+
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .topbar-logo {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .topbar-title {
+      font-size: 15px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .topbar-sub {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 1px;
+    }
+
+    /* Badge showing unacked count */
+    .badge-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 20px;
+      height: 20px;
+      padding: 0 5px;
+      background: var(--red);
+      color: #fff;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .badge-count.hidden { display: none; }
+
+    /* ── Panic button ──────────────────────────────────────────────────── */
+    .panic-strip {
+      padding: 10px 16px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .btn-panic {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
+      padding: 14px;
+      background: var(--red);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    .btn-panic:active {
+      background: var(--red-deep);
+      transform: scale(0.98);
+    }
+
+    .btn-panic.loading {
+      background: var(--red-deep);
+      pointer-events: none;
+    }
+
+    .btn-panic .spinner {
+      display: none;
+      width: 18px;
+      height: 18px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    .btn-panic.loading .spinner { display: block; }
+    .btn-panic.loading .panic-icon { display: none; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Panic cooldown strip (shown after press) */
+    .panic-cooldown {
+      font-size: 12px;
+      color: var(--amber);
+      text-align: center;
+      margin-top: 6px;
+      min-height: 16px;
+    }
+
+    /* ── Filter pills ──────────────────────────────────────────────────── */
+    .filter-row {
+      display: flex;
+      gap: 8px;
+      padding: 10px 16px;
+      overflow-x: auto;
+      scrollbar-width: none;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .filter-row::-webkit-scrollbar { display: none; }
+
+    .pill {
+      flex-shrink: 0;
+      padding: 5px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-dim);
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+
+    .pill.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    /* ── Alert list ────────────────────────────────────────────────────── */
+    .alert-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 16px 80px;     /* 80px bottom pad for safe area + home bar */
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* pull-to-refresh hint */
+    .ptr-hint {
+      text-align: center;
+      font-size: 12px;
+      color: var(--muted);
+      padding: 4px 0 8px;
+    }
+
+    /* ── Alert card ────────────────────────────────────────────────────── */
+    .alert-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--muted);
+      border-radius: var(--radius);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: opacity 0.3s;
+    }
+
+    .alert-card[data-severity="high"]   { border-left-color: var(--red); }
+    .alert-card[data-severity="medium"] { border-left-color: var(--amber); }
+    .alert-card[data-severity="low"]    { border-left-color: var(--green); }
+    .alert-card.acked { opacity: 0.45; }
+
+    .alert-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    .alert-icon {
+      font-size: 22px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .alert-meta {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .alert-type {
+      font-size: 14px;
+      font-weight: 700;
+      text-transform: capitalize;
+    }
+
+    .alert-type.forced_entry { color: var(--red); }
+    .alert-type.tailgate     { color: var(--amber); }
+    .alert-type.safety_alert { color: var(--red); }
+    .alert-type.loitering    { color: var(--amber); }
+    .alert-type.left_object  { color: #a78bfa; }
+
+    .alert-detail {
+      font-size: 12px;
+      color: var(--text-dim);
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .alert-time {
+      font-size: 11px;
+      color: var(--muted);
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+
+    /* confidence bar */
+    .conf-bar-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .conf-bar-track {
+      flex: 1;
+      height: 4px;
+      border-radius: 2px;
+      background: var(--surface-2);
+      overflow: hidden;
+    }
+
+    .conf-bar-fill {
+      height: 100%;
+      border-radius: 2px;
+      background: var(--accent);
+      transition: width 0.3s;
+    }
+
+    .conf-label {
+      font-size: 11px;
+      color: var(--muted);
+      width: 38px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    /* acked badge */
+    .ack-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      color: var(--green);
+      padding: 3px 8px;
+      border-radius: var(--radius-sm);
+      background: rgba(34,197,94,0.12);
+      border: 1px solid rgba(34,197,94,0.25);
+    }
+
+    /* ── Alert action row ──────────────────────────────────────────────── */
+    .action-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn-action {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 10px 8px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background 0.15s, transform 0.1s;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    .btn-action:active { transform: scale(0.96); }
+
+    .btn-ack {
+      background: rgba(34,197,94,0.12);
+      border-color: rgba(34,197,94,0.3);
+      color: var(--green);
+    }
+
+    .btn-ack:disabled {
+      opacity: 0.4;
+      pointer-events: none;
+    }
+
+    .btn-navigate {
+      background: rgba(14,165,233,0.1);
+      border-color: rgba(14,165,233,0.3);
+      color: var(--accent);
+    }
+
+    /* ── Empty state ───────────────────────────────────────────────────── */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 60px 24px;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    .empty-state .icon { font-size: 48px; }
+    .empty-state .title { font-size: 16px; font-weight: 600; color: var(--text-dim); }
+    .empty-state .sub   { font-size: 13px; }
+
+    /* ── Toast notification ─────────────────────────────────────────────── */
+    .toast-container {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      pointer-events: none;
+      width: calc(100% - 32px);
+      max-width: 440px;
+    }
+
+    .toast {
+      padding: 12px 16px;
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      font-weight: 500;
+      color: #fff;
+      opacity: 0;
+      transform: translateY(12px);
+      transition: all 0.25s ease;
+      width: 100%;
+      text-align: center;
+      pointer-events: none;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .toast.success { background: var(--green); }
+    .toast.error   { background: var(--red); }
+    .toast.info    { background: var(--accent); }
+    .toast.warning { background: var(--amber); color: #1a1a1a; }
+
+    /* ── Connection dot ────────────────────────────────────────────────── */
+    .conn-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background 0.3s;
+      flex-shrink: 0;
+    }
+
+    .conn-dot.connected    { background: var(--green); }
+    .conn-dot.disconnected { background: var(--red); animation: blink 1s infinite; }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    /* ── Refresh FAB ────────────────────────────────────────────────────── */
+    .fab {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 16px rgba(14,165,233,0.4);
+      cursor: pointer;
+      z-index: 50;
+      transition: transform 0.3s;
+    }
+
+    .fab.spinning { animation: spin 0.8s linear infinite; }
+  </style>
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- ── Topbar ──────────────────────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="topbar-logo">🛡</div>
+      <div>
+        <div class="topbar-title">PCS Admin</div>
+        <div class="topbar-sub">On-Call Alerts</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span class="conn-dot" id="connDot"></span>
+      <span class="badge-count hidden" id="unackedBadge">0</span>
+    </div>
+  </header>
+
+  <!-- ── Panic strip ─────────────────────────────────────────────────────── -->
+  <div class="panic-strip">
+    <button class="btn-panic" id="panicBtn" onclick="triggerPanic()">
+      <span class="panic-icon">🚨</span>
+      <span class="spinner"></span>
+      <span>PANIC — Escalate by SMS Now</span>
+    </button>
+    <div class="panic-cooldown" id="panicCooldown"></div>
+  </div>
+
+  <!-- ── Filter pills ────────────────────────────────────────────────────── -->
+  <nav class="filter-row" id="filterRow">
+    <button class="pill active" data-filter="all"          onclick="setFilter('all',this)">All</button>
+    <button class="pill"        data-filter="unacked"      onclick="setFilter('unacked',this)">Unacked</button>
+    <button class="pill"        data-filter="forced_entry" onclick="setFilter('forced_entry',this)">Forced Entry</button>
+    <button class="pill"        data-filter="tailgate"     onclick="setFilter('tailgate',this)">Tailgate</button>
+    <button class="pill"        data-filter="safety_alert" onclick="setFilter('safety_alert',this)">Safety</button>
+    <button class="pill"        data-filter="loitering"    onclick="setFilter('loitering',this)">Loitering</button>
+    <button class="pill"        data-filter="left_object"  onclick="setFilter('left_object',this)">Left Object</button>
+  </nav>
+
+  <!-- ── Alert list ──────────────────────────────────────────────────────── -->
+  <main class="alert-list" id="alertList">
+    <div class="ptr-hint" id="ptrHint">Pull to refresh</div>
+    <div class="empty-state" id="emptyState" style="display:none">
+      <div class="icon">✅</div>
+      <div class="title">All clear</div>
+      <div class="sub">No alerts match the current filter</div>
+    </div>
+  </main>
+
+</div><!-- /app-shell -->
+
+<!-- ── Refresh FAB ──────────────────────────────────────────────────── -->
+<button class="fab" id="refreshFab" title="Refresh" onclick="loadAlerts()">↻</button>
+
+<!-- ── Toast container ─────────────────────────────────────────────── -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- Socket.IO -->
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"
+        crossorigin="anonymous"></script>
+
+<script>
+/* ─────────────────────────────────────────────────────────────────────
+   State
+   ───────────────────────────────────────────────────────────────────── */
+let _alerts       = [];
+let _currentFilter = "all";
+let _panicCooldown = 0;
+let _panicTimer    = null;
+
+/* ─────────────────────────────────────────────────────────────────────
+   Severity helper
+   ───────────────────────────────────────────────────────────────────── */
+const SEVERITY_MAP = {
+  forced_entry: "high",
+  tailgate:     "high",
+  safety_alert: "high",
+  loitering:    "medium",
+  left_object:  "medium",
+};
+
+const TYPE_ICON = {
+  forced_entry: "🚪",
+  tailgate:     "👥",
+  safety_alert: "🔥",
+  loitering:    "⏱",
+  left_object:  "📦",
+};
+
+function severity(alert_type) {
+  return SEVERITY_MAP[alert_type] || "low";
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Time format
+   ───────────────────────────────────────────────────────────────────── */
+function relativeTime(isoStr) {
+  if (!isoStr) return "—";
+  const diff = Math.floor((Date.now() - new Date(isoStr)) / 1000);
+  if (diff < 60)   return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
+  return new Date(isoStr).toLocaleDateString();
+}
+
+function formatTime(isoStr) {
+  if (!isoStr) return "—";
+  return new Date(isoStr).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Render
+   ───────────────────────────────────────────────────────────────────── */
+function filtered() {
+  if (_currentFilter === "all")    return _alerts;
+  if (_currentFilter === "unacked") return _alerts.filter(a => !a.acknowledged);
+  return _alerts.filter(a => a.alert_type === _currentFilter);
+}
+
+function renderAlerts() {
+  const list      = document.getElementById("alertList");
+  const emptyState = document.getElementById("emptyState");
+  const hint      = document.getElementById("ptrHint");
+  const items     = filtered();
+
+  /* remove old cards (keep ptr-hint and empty-state) */
+  [...list.querySelectorAll(".alert-card")].forEach(el => el.remove());
+
+  if (items.length === 0) {
+    emptyState.style.display = "";
+    hint.style.display = "none";
+    return;
+  }
+
+  emptyState.style.display = "none";
+  hint.style.display = "";
+
+  items.forEach(a => {
+    const card = buildCard(a);
+    list.appendChild(card);
+  });
+
+  /* update unacked badge */
+  const unacked = _alerts.filter(a => !a.acknowledged).length;
+  const badge   = document.getElementById("unackedBadge");
+  badge.textContent = unacked;
+  badge.classList.toggle("hidden", unacked === 0);
+}
+
+function buildCard(a) {
+  const sev  = severity(a.alert_type);
+  const icon = TYPE_ICON[a.alert_type] || "⚠️";
+  const conf = Math.round((a.confidence || 0) * 100);
+  const time = relativeTime(a.timestamp_utc || a.detected_utc || a.created_at);
+
+  const card = document.createElement("div");
+  card.className = `alert-card${a.acknowledged ? " acked" : ""}`;
+  card.dataset.severity = sev;
+  card.dataset.id = a.id;
+
+  const typeCls  = (a.alert_type || "").replace(/[^a-z_]/g, "");
+  const typeLabel = (a.alert_type || "unknown").replace(/_/g, " ");
+  const camLabel  = a.camera_id  || "—";
+  const doorLabel = a.door_id    || "";
+
+  card.innerHTML = `
+    <div class="alert-header">
+      <div class="alert-icon">${icon}</div>
+      <div class="alert-meta">
+        <div class="alert-type ${typeCls}">${typeLabel}</div>
+        <div class="alert-detail">📷 ${camLabel}${doorLabel ? " · 🚪 " + doorLabel : ""}</div>
+        ${a.acknowledged && a.acked_by
+          ? `<div class="alert-detail" style="color:#22c55e">✓ acked by ${a.acked_by}</div>`
+          : ""}
+      </div>
+      <div class="alert-time">${time}<br/><span style="font-size:10px;color:var(--muted)">#${a.id}</span></div>
+    </div>
+
+    ${conf > 0 ? `
+    <div class="conf-bar-wrap">
+      <div class="conf-bar-track">
+        <div class="conf-bar-fill" style="width:${conf}%;background:${
+          conf >= 80 ? "var(--red)" : conf >= 50 ? "var(--amber)" : "var(--green)"
+        }"></div>
+      </div>
+      <div class="conf-label">${conf}%</div>
+    </div>` : ""}
+
+    <div class="action-row">
+      <button
+        class="btn-action btn-ack"
+        onclick="ackAlert(${a.id}, this)"
+        ${a.acknowledged ? "disabled" : ""}>
+        ${a.acknowledged
+          ? `<span class="ack-badge">✓ Acked</span>`
+          : "✓ Acknowledge"}
+      </button>
+      <a class="btn-action btn-navigate"
+         href="/admin/campus${a.camera_id ? '#' + a.camera_id : ''}"
+         target="_blank" rel="noopener">
+        📷 Navigate
+      </a>
+    </div>
+  `;
+
+  return card;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Filter
+   ───────────────────────────────────────────────────────────────────── */
+function setFilter(filter, btn) {
+  _currentFilter = filter;
+  document.querySelectorAll(".pill").forEach(p => p.classList.remove("active"));
+  btn.classList.add("active");
+  renderAlerts();
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Load alerts from REST
+   ───────────────────────────────────────────────────────────────────── */
+async function loadAlerts() {
+  const fab = document.getElementById("refreshFab");
+  fab.classList.add("spinning");
+
+  try {
+    /* load alerts from multiple endpoints in parallel */
+    const [alerResp, loiterResp, leftResp] = await Promise.all([
+      fetch("/api/alerts?n=50"),
+      fetch("/api/loitering?n=30"),
+      fetch("/api/left-objects?n=30"),
+    ]);
+
+    const alertData  = alerResp.ok  ? await alerResp.json()  : {alerts:[]};
+    const loiterData = loiterResp.ok ? await loiterResp.json() : {events:[]};
+    const leftData   = leftResp.ok  ? await leftResp.json()  : {events:[]};
+
+    /* normalise loitering events to alert shape */
+    const loitering = (loiterData.events || []).map(e => ({
+      id:           e.id,
+      alert_type:   "loitering",
+      camera_id:    e.camera_id,
+      door_id:      null,
+      subject_key:  e.subject_key,
+      confidence:   0,
+      timestamp_utc: e.detected_utc || e.first_seen_utc,
+      meta:          {},
+      acknowledged:  e.dismissed,
+      acked_by:      e.dismissed_by,
+      acked_at:      null,
+    }));
+
+    const leftObjects = (leftData.events || []).map(e => ({
+      id:           e.id,
+      alert_type:   "left_object",
+      camera_id:    e.camera_id,
+      door_id:      null,
+      subject_key:  null,
+      confidence:   0,
+      timestamp_utc: e.detected_utc || e.first_seen_utc,
+      meta:          {dwell_s: e.dwell_s, bbox: e.bbox},
+      acknowledged:  e.dismissed,
+      acked_by:      e.dismissed_by,
+      acked_at:      null,
+    }));
+
+    _alerts = [
+      ...(alertData.alerts || []),
+      ...loitering,
+      ...leftObjects,
+    ].sort((a,b) => new Date(b.timestamp_utc||0) - new Date(a.timestamp_utc||0));
+
+    renderAlerts();
+    showToast("Alerts refreshed", "info", 1500);
+  } catch(e) {
+    showToast("Failed to load alerts: " + e.message, "error");
+  } finally {
+    fab.classList.remove("spinning");
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Acknowledge
+   ───────────────────────────────────────────────────────────────────── */
+async function ackAlert(id, btn) {
+  btn.disabled = true;
+  btn.textContent = "…";
+
+  try {
+    const res = await fetch(`/api/alerts/${id}/ack`, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({acked_by: "mobile-admin"}),
+    });
+
+    if (res.ok) {
+      const a = _alerts.find(x => x.id == id);
+      if (a) { a.acknowledged = true; a.acked_by = "mobile-admin"; }
+      renderAlerts();
+      showToast("Alert #" + id + " acknowledged ✓", "success");
+    } else {
+      btn.disabled = false;
+      btn.textContent = "✓ Acknowledge";
+      showToast("Ack failed (" + res.status + ")", "error");
+    }
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = "✓ Acknowledge";
+    showToast("Network error", "error");
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Panic button
+   ───────────────────────────────────────────────────────────────────── */
+async function triggerPanic() {
+  if (_panicCooldown > 0) return;
+
+  if (!confirm("⚠️ Send PANIC escalation via SMS to all on-call numbers?")) return;
+
+  const btn = document.getElementById("panicBtn");
+  btn.classList.add("loading");
+
+  try {
+    const res = await fetch("/api/alerts/panic", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        triggered_by: "mobile-admin",
+        message: "PANIC escalation triggered from mobile admin view",
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      showToast(
+        `🚨 Panic sent! ${data.sms_count ?? 0} SMS dispatched.`,
+        "warning",
+        4000
+      );
+      startPanicCooldown(60);
+    } else {
+      const err = await res.json().catch(() => ({error:"Unknown error"}));
+      showToast("Panic failed: " + (err.error || res.status), "error");
+    }
+  } catch(e) {
+    showToast("Network error during panic: " + e.message, "error");
+  } finally {
+    btn.classList.remove("loading");
+  }
+}
+
+function startPanicCooldown(seconds) {
+  _panicCooldown = seconds;
+  const cd = document.getElementById("panicCooldown");
+  const btn = document.getElementById("panicBtn");
+
+  btn.disabled = true;
+  _panicTimer = setInterval(() => {
+    _panicCooldown--;
+    if (_panicCooldown <= 0) {
+      clearInterval(_panicTimer);
+      btn.disabled = false;
+      cd.textContent = "";
+    } else {
+      cd.textContent = `Cooldown: ${_panicCooldown}s before next escalation`;
+    }
+  }, 1000);
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Toast helper
+   ───────────────────────────────────────────────────────────────────── */
+function showToast(msg, type="info", duration=3000) {
+  const container = document.getElementById("toastContainer");
+  const el = document.createElement("div");
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  container.appendChild(el);
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => el.classList.add("show"));
+  });
+
+  setTimeout(() => {
+    el.classList.remove("show");
+    setTimeout(() => el.remove(), 300);
+  }, duration);
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Socket.IO live updates
+   ───────────────────────────────────────────────────────────────────── */
+const socket = io({ transports: ["websocket", "polling"] });
+const connDot = document.getElementById("connDot");
+
+socket.on("connect", () => {
+  connDot.className = "conn-dot connected";
+  showToast("Live updates connected", "success", 1800);
+});
+
+socket.on("disconnect", () => {
+  connDot.className = "conn-dot disconnected";
+  showToast("Disconnected — reconnecting…", "warning");
+});
+
+/* new alert events */
+["alert", "safety_alert", "forced_entry", "tailgate"].forEach(evt => {
+  socket.on(evt, (payload) => {
+    if (!payload || !payload.id) return;
+    const exists = _alerts.find(a => a.id === payload.id && a.alert_type === payload.alert_type);
+    if (!exists) {
+      _alerts.unshift(payload);
+      showToast(`New ${(payload.alert_type||"alert").replace(/_/g," ")} on ${payload.camera_id||"?"}`, "warning", 3000);
+      renderAlerts();
+    }
+  });
+});
+
+socket.on("loitering", (payload) => {
+  if (!payload) return;
+  const norm = {
+    id: payload.id, alert_type: "loitering",
+    camera_id: payload.camera_id, door_id: null,
+    subject_key: payload.subject_key, confidence: 0,
+    timestamp_utc: payload.detected_utc || payload.first_seen_utc,
+    meta: {dwell_s: payload.dwell_s}, acknowledged: payload.dismissed,
+    acked_by: null, acked_at: null,
+  };
+  const exists = _alerts.find(a => a.id === payload.id && a.alert_type === "loitering");
+  if (!exists) {
+    _alerts.unshift(norm);
+    showToast(`Loitering detected on ${payload.camera_id||"?"}`, "warning", 3000);
+    renderAlerts();
+  }
+});
+
+socket.on("left_object", (payload) => {
+  if (!payload) return;
+  const norm = {
+    id: payload.id, alert_type: "left_object",
+    camera_id: payload.camera_id, door_id: null,
+    subject_key: null, confidence: 0,
+    timestamp_utc: payload.detected_utc || payload.first_seen_utc,
+    meta: {dwell_s: payload.dwell_s, bbox: payload.bbox}, acknowledged: payload.dismissed,
+    acked_by: null, acked_at: null,
+  };
+  const exists = _alerts.find(a => a.id === payload.id && a.alert_type === "left_object");
+  if (!exists) {
+    _alerts.unshift(norm);
+    showToast(`Left object detected on ${payload.camera_id||"?"}`, "info", 3000);
+    renderAlerts();
+  }
+});
+
+/* ack broadcast from another session */
+socket.on("alert_ack", (payload) => {
+  const a = _alerts.find(x => x.id === payload.id && x.alert_type === payload.alert_type);
+  if (a) {
+    a.acknowledged = true;
+    a.acked_by = payload.acked_by;
+    a.acked_at = payload.acked_at;
+    renderAlerts();
+  }
+});
+
+/* ─────────────────────────────────────────────────────────────────────
+   Pull-to-refresh (touch API)
+   ───────────────────────────────────────────────────────────────────── */
+let ptrStart = 0;
+const mainEl = document.getElementById("alertList");
+
+mainEl.addEventListener("touchstart", e => {
+  if (mainEl.scrollTop === 0) ptrStart = e.touches[0].clientY;
+}, {passive:true});
+
+mainEl.addEventListener("touchend", e => {
+  if (ptrStart && (e.changedTouches[0].clientY - ptrStart) > 70) loadAlerts();
+  ptrStart = 0;
+}, {passive:true});
+
+/* ─────────────────────────────────────────────────────────────────────
+   Init
+   ───────────────────────────────────────────────────────────────────── */
+loadAlerts();
+</script>
+</body>
+</html>

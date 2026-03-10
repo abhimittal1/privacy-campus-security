@@ -1,0 +1,66 @@
+# ── Privacy-Preserving Campus Security – Docker Compose ───────────────────────
+#
+#  Default stack (web only):
+#    docker compose up
+#
+#  Full stack (web + Mosquitto MQTT broker):
+#    docker compose --profile mqtt up
+#
+# ---------------------------------------------------------------------------
+
+services:
+
+  # ── Flask / SocketIO dashboard ───────────────────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: privacy-campus-security:latest
+    container_name: pcs-web
+
+    ports:
+      - "5000:5000"           # Dashboard / REST API / SocketIO
+
+    volumes:
+      # Persist the SQLite embedding store and any experiment outputs
+      - ./data:/app/data
+
+    environment:
+      PCS_STORE: /app/data/embeddings.json
+      # ⚠  Replace with a strong random value before deploying to production
+      PCS_EMBEDDING_SALT: "changeme-replace-in-production"
+      PCS_ENCRYPT: "0"
+      PCS_DEVICE: cpu
+      FLASK_HOST: "0.0.0.0"
+      FLASK_PORT: "5000"
+      FLASK_DEBUG: "0"
+      # Uncomment to allow cross-origin requests from specific hosts:
+      # CORS_ORIGINS: "http://your-frontend-host:3000"
+
+    restart: unless-stopped
+
+
+  # ── Mosquitto MQTT broker (optional – start with --profile mqtt) ─────────────
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: pcs-mosquitto
+    profiles:
+      - mqtt                  # Only started when: docker compose --profile mqtt up
+
+    ports:
+      - "1883:1883"           # Plain MQTT
+      - "9001:9001"           # MQTT-over-WebSocket
+
+    volumes:
+      # Broker config (read-only)
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      # Named volumes for persistent message store and logs
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+
+    restart: unless-stopped
+
+
+volumes:
+  mosquitto-data:
+  mosquitto-log:

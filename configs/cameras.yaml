@@ -1,0 +1,85 @@
+# configs/cameras.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Campus Camera Registry
+#
+# Each entry defines a physical camera installed on campus.
+# Fields
+# ------
+#   camera_id   : unique slug used throughout the system (MQTT topic segment,
+#                 SQLite camera_id column, CLI --camera-id value)
+#   name        : human-readable display name shown in the dashboard
+#   door_id     : associated access-control door identifier (may be null)
+#   coordinates : GPS location of the camera (WGS-84 decimal degrees)
+#   active      : false to exclude from live processing without removing the row
+#
+# MQTT topic naming scheme
+# ─────────────────────────
+#   Video frames  →  campus/<camera_id>/frame
+#   Sensor events →  campus/<camera_id>/sensor
+#
+# Example publishes
+# ─────────────────
+#   mosquitto_pub -t campus/gate-north/frame  -f frame.jpg
+#   mosquitto_pub -t campus/gate-north/sensor -m '{"temp_c":22.5}'
+#
+# Usage in code
+# ─────────────
+#   from src.privacy.camera_store import CameraRegistry
+#   reg = CameraRegistry("configs/cameras.yaml")
+#   cam = reg.get("gate-north")        # → CameraEntry dataclass
+#   topic = reg.frame_topic("gate-north")   # → "campus/gate-north/frame"
+# ─────────────────────────────────────────────────────────────────────────────
+
+mqtt:
+  broker_host: localhost
+  broker_port: 1883
+  topic_prefix: campus          # campus/<camera_id>/frame|sensor
+
+cameras:
+  - camera_id: gate-north
+    name: "Main Gate North"
+    door_id: door-001
+    coordinates:
+      lat: 28.7041
+      lon: 77.1025
+    active: true
+
+  - camera_id: gate-south
+    name: "Main Gate South"
+    door_id: door-002
+    coordinates:
+      lat: 28.7035
+      lon: 77.1025
+    active: true
+
+  - camera_id: lib-entrance
+    name: "Library Entrance"
+    door_id: door-010
+    coordinates:
+      lat: 28.7038
+      lon: 77.1030
+    active: true
+
+  - camera_id: hostel-a-lobby
+    name: "Hostel A Lobby"
+    door_id: door-020
+    coordinates:
+      lat: 28.7050
+      lon: 77.1018
+    active: true
+
+  - camera_id: admin-block
+    name: "Admin Block Reception"
+    door_id: door-030
+    coordinates:
+      lat: 28.7044
+      lon: 77.1022
+    active: true
+
+  - camera_id: parking-east
+    name: "East Parking Bay"
+    door_id: null
+    coordinates:
+      lat: 28.7033
+      lon: 77.1035
+    active: false

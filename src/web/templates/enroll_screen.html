@@ -1,0 +1,974 @@
+<!doctype html>
+<!--
+  enroll_screen.html – Single-screen enrollment UI
+  ─────────────────────────────────────────────────
+  Route  : GET /enroll/screen
+  Socket : arm_enroll  → server  | arm_ack      ← server
+           enroll_frame → server  | enroll_result ← server
+                                  | camera_status  ← server (broadcast)
+
+  Flow:
+    1. Admin sees a grid of campus camera cards.
+    2. Clicks "Enroll" on a card → arms that camera.
+    3. Webcam starts; frames are streamed to the server.
+    4. On first frame with ≥ 1 face, the server batch-enrolls all faces
+       and emits enroll_result.
+    5. A modal is shown with face crop(s) and editable metadata.
+    6. Show the generated opaque keys and allow the admin to copy them.
+-->
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>PCS · Enroll Screen</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+        integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"/>
+
+  <style>
+    /* ── Design tokens (match dashboard.html) ────────────────────────────── */
+    :root {
+      --pcs-bg:         #080f1a;
+      --pcs-surface:    #0f1d2e;
+      --pcs-surface-2:  #162233;
+      --pcs-border:     #1e3048;
+      --pcs-accent:     #0ea5e9;
+      --pcs-accent-dim: #0284c7;
+      --pcs-green:      #22c55e;
+      --pcs-amber:      #f59e0b;
+      --pcs-red:        #ef4444;
+      --pcs-muted:      #64748b;
+      --pcs-text:       #e2e8f0;
+      --pcs-text-dim:   #94a3b8;
+      --pcs-font:       'Inter', system-ui, sans-serif;
+      --pcs-mono:       'JetBrains Mono', monospace;
+      --pcs-radius:     12px;
+      --pcs-radius-sm:  8px;
+      --pcs-shadow:     0 4px 24px rgba(0,0,0,.45);
+      --pcs-glow:       0 0 0 3px rgba(14,165,233,.25);
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      font-family: var(--pcs-font);
+      background: var(--pcs-bg);
+      color: var(--pcs-text);
+      font-size: .9375rem;
+      margin: 0;
+    }
+
+    /* ── Topbar ──────────────────────────────────────────────────────────── */
+    .pcs-topbar {
+      position: sticky; top: 0; z-index: 1030;
+      background: var(--pcs-surface);
+      border-bottom: 1px solid var(--pcs-border);
+      padding: .75rem 1.5rem;
+      display: flex; align-items: center; gap: 1rem;
+    }
+    .pcs-topbar .brand { font-weight: 700; font-size: 1rem; color: var(--pcs-text); text-decoration: none; display: flex; align-items: center; gap: .5rem; }
+    .pcs-topbar .brand i { color: var(--pcs-accent); font-size: 1.3rem; }
+    .pill { background: var(--pcs-accent); color: #fff; font-size: .65rem; font-weight: 700; padding: .15rem .55rem; border-radius: 999px; letter-spacing: .06em; text-transform: uppercase; }
+    .ws-badge { font-size: .65rem; font-weight: 700; padding: .15rem .55rem; border-radius: 999px; letter-spacing: .06em; text-transform: uppercase; }
+    .ws-badge.connected    { background: rgba(34,197,94,.15); color: var(--pcs-green); }
+    .ws-badge.disconnected { background: rgba(239,68,68,.15); color: var(--pcs-red); }
+
+    /* ── Wrapper ─────────────────────────────────────────────────────────── */
+    .pcs-wrapper { max-width: 1400px; margin: 0 auto; padding: 1.75rem 1.25rem 4rem; }
+    .section-label {
+      font-size: .7rem; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--pcs-muted);
+      margin-bottom: .75rem; display: flex; align-items: center; gap: .4rem;
+    }
+    .section-label::after { content:''; flex:1; height:1px; background: var(--pcs-border); }
+
+    /* ── Camera card ─────────────────────────────────────────────────────── */
+    .cam-card {
+      background: var(--pcs-surface);
+      border: 1px solid var(--pcs-border);
+      border-radius: var(--pcs-radius);
+      box-shadow: var(--pcs-shadow);
+      transition: border-color .2s, box-shadow .2s;
+      overflow: hidden;
+      display: flex; flex-direction: column;
+      height: 100%;
+    }
+    .cam-card:hover { border-color: var(--pcs-accent); box-shadow: var(--pcs-glow); }
+    .cam-card.armed {
+      border-color: var(--pcs-amber);
+      box-shadow: 0 0 0 3px rgba(245,158,11,.22);
+      animation: armPulse 2s ease-in-out infinite;
+    }
+    @keyframes armPulse { 0%,100%{box-shadow: 0 0 0 3px rgba(245,158,11,.22)} 50%{box-shadow: 0 0 0 6px rgba(245,158,11,.10)} }
+
+    .cam-thumb {
+      width: 100%; aspect-ratio: 16/9;
+      background: var(--pcs-bg);
+      display: flex; align-items: center; justify-content: center;
+      border-bottom: 1px solid var(--pcs-border);
+      position: relative;
+      overflow: hidden;
+    }
+    .cam-thumb-icon { font-size: 2.5rem; opacity: .2; }
+    .cam-thumb-badge {
+      position: absolute; top: .45rem; right: .45rem;
+      font-size: .62rem; font-weight: 700; padding: .15rem .5rem;
+      border-radius: 999px; letter-spacing: .06em; text-transform: uppercase;
+    }
+    .cam-thumb-badge.active   { background: rgba(34,197,94,.2);  color: var(--pcs-green); border: 1px solid rgba(34,197,94,.4); }
+    .cam-thumb-badge.inactive { background: rgba(100,116,139,.2); color: var(--pcs-muted); border: 1px solid rgba(100,116,139,.3); }
+    .cam-thumb-badge.armed    { background: rgba(245,158,11,.25); color: var(--pcs-amber); border: 1px solid rgba(245,158,11,.5); }
+    .cam-thumb-snap {
+      position: absolute; top: .45rem; left: .45rem;
+      font-size: .62rem; font-weight: 700; padding: .15rem .5rem;
+      border-radius: 999px; background: rgba(239,68,68,.25); color: var(--pcs-red);
+      border: 1px solid rgba(239,68,68,.5); letter-spacing: .06em;
+      display: none;
+    }
+    .cam-thumb-snap.visible { display: block; }
+
+    .cam-body { padding: 1rem; flex: 1; display: flex; flex-direction: column; gap: .5rem; }
+    .cam-name { font-weight: 700; font-size: .9rem; color: var(--pcs-text); line-height: 1.2; }
+    .cam-id   { font-family: var(--pcs-mono); font-size: .72rem; color: var(--pcs-accent); }
+    .cam-meta { font-size: .78rem; color: var(--pcs-text-dim); display: flex; flex-wrap: wrap; gap: .3rem .75rem; margin-top: .15rem; }
+    .cam-meta span { display: flex; align-items: center; gap: .25rem; }
+
+    .cam-footer { padding: .75rem 1rem; border-top: 1px solid var(--pcs-border); display: flex; gap: .5rem; align-items: center; }
+
+    /* ── Buttons ─────────────────────────────────────────────────────────── */
+    .pcs-btn {
+      display: inline-flex; align-items: center; gap: .4rem;
+      padding: .45rem 1.1rem; border: none; border-radius: var(--pcs-radius-sm);
+      font-size: .82rem; font-weight: 600; cursor: pointer;
+      transition: background .15s, transform .1s; white-space: nowrap;
+    }
+    .pcs-btn:hover   { opacity: .9; }
+    .pcs-btn:active  { transform: scale(.97); }
+    .pcs-btn:disabled { opacity: .45; cursor: not-allowed; }
+    .pcs-btn-enroll  { background: var(--pcs-accent); color: #fff; }
+    .pcs-btn-cancel  { background: rgba(245,158,11,.15); color: var(--pcs-amber); border: 1px solid rgba(245,158,11,.35); }
+    .pcs-btn-danger  { background: rgba(239,68,68,.15);  color: var(--pcs-red);   border: 1px solid rgba(239,68,68,.35); }
+    .pcs-btn-secondary { background: var(--pcs-surface-2); color: var(--pcs-text); border: 1px solid var(--pcs-border); }
+    .pcs-btn-success { background: rgba(34,197,94,.15);  color: var(--pcs-green); border: 1px solid rgba(34,197,94,.35); }
+
+    /* ── Capture panel ───────────────────────────────────────────────────── */
+    #capture-panel {
+      background: var(--pcs-surface);
+      border: 1px solid var(--pcs-border);
+      border-radius: var(--pcs-radius);
+      box-shadow: var(--pcs-shadow);
+      padding: 1.25rem 1.5rem;
+    }
+    #capture-panel.hidden { display: none; }
+    .capture-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: .85rem; flex-wrap: wrap; gap: .5rem; }
+    .capture-title  { font-weight: 700; font-size: .95rem; color: var(--pcs-text); display: flex; align-items: center; gap: .5rem; }
+    .capture-cam-id { font-family: var(--pcs-mono); color: var(--pcs-amber); font-size: .85rem; }
+
+    .capture-body { display: flex; gap: 1.25rem; flex-wrap: wrap; }
+    .capture-video-wrap {
+      flex: 0 0 380px; position: relative;
+      background: #000; border-radius: var(--pcs-radius-sm); overflow: hidden;
+      line-height: 0;
+    }
+    #capture-video { width: 100%; height: 214px; object-fit: cover; display: block; }
+    #capture-canvas { display: none; }
+    .capture-video-overlay {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      padding: .35rem .7rem; font-size: .78rem; font-weight: 700;
+      font-family: var(--pcs-mono); text-align: center;
+      backdrop-filter: blur(6px);
+      border-radius: 0 0 var(--pcs-radius-sm) var(--pcs-radius-sm);
+    }
+    .capture-video-overlay.idle   { background: rgba(15,29,46,.8); color: var(--pcs-muted); }
+    .capture-video-overlay.armed  { background: rgba(245,158,11,.25); color: var(--pcs-amber); }
+    .capture-video-overlay.ok     { background: rgba(34,197,94,.25); color: var(--pcs-green); }
+    .capture-video-overlay.noface { background: rgba(239,68,68,.2); color: var(--pcs-red); }
+
+    .capture-controls { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: .85rem; }
+    .pcs-label { font-size: .78rem; font-weight: 500; color: var(--pcs-text-dim); margin-bottom: .3rem; display: block; }
+    .pcs-input {
+      width: 100%; padding: .5rem .85rem;
+      background: var(--pcs-bg); border: 1px solid var(--pcs-border);
+      border-radius: var(--pcs-radius-sm); color: var(--pcs-text);
+      font-size: .875rem; transition: border-color .15s; outline: none;
+    }
+    .pcs-input:focus { border-color: var(--pcs-accent); box-shadow: var(--pcs-glow); }
+    .pcs-input.mono { font-family: var(--pcs-mono); }
+
+    .capture-status { font-size: .8rem; font-family: var(--pcs-mono); color: var(--pcs-muted); min-height: 1.3rem; }
+    .fps-counter    { font-size: .72rem; font-family: var(--pcs-mono); color: var(--pcs-muted); }
+
+    /* ── Enroll result modal ─────────────────────────────────────────────── */
+    .pcs-modal-backdrop {
+      position: fixed; inset: 0; z-index: 2000;
+      background: rgba(4,10,18,.75); backdrop-filter: blur(4px);
+      display: flex; align-items: center; justify-content: center;
+      padding: 1rem;
+    }
+    .pcs-modal-backdrop.hidden { display: none; }
+
+    .pcs-modal {
+      background: var(--pcs-surface);
+      border: 1px solid var(--pcs-border);
+      border-radius: var(--pcs-radius);
+      box-shadow: 0 8px 48px rgba(0,0,0,.7);
+      width: 100%; max-width: 680px;
+      max-height: 90vh; overflow-y: auto;
+      padding: 1.5rem;
+    }
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 1.25rem;
+    }
+    .modal-title { font-weight: 700; font-size: 1rem; color: var(--pcs-text); display: flex; align-items: center; gap: .5rem; }
+    .modal-close { background: none; border: none; color: var(--pcs-muted); font-size: 1.25rem; cursor: pointer; padding: .25rem; border-radius: 6px; transition: color .15s; }
+    .modal-close:hover { color: var(--pcs-text); }
+
+    .face-result-grid { display: flex; flex-wrap: wrap; gap: 1rem; }
+    .face-result-card {
+      flex: 1 1 180px;
+      background: var(--pcs-surface-2);
+      border: 1px solid var(--pcs-border);
+      border-radius: var(--pcs-radius-sm);
+      overflow: hidden;
+    }
+    .face-crop {
+      width: 100%; aspect-ratio: 1;
+      object-fit: cover; display: block;
+      background: var(--pcs-bg);
+    }
+    .face-crop-placeholder {
+      width: 100%; aspect-ratio: 1;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--pcs-bg); color: var(--pcs-muted); font-size: 2.5rem;
+    }
+    .face-meta { padding: .75rem; display: flex; flex-direction: column; gap: .5rem; }
+    .face-index { font-size: .68rem; font-weight: 700; color: var(--pcs-muted); text-transform: uppercase; letter-spacing: .08em; }
+    .face-key-box {
+      font-family: var(--pcs-mono); font-size: .68rem; color: var(--pcs-accent);
+      background: var(--pcs-bg); border: 1px solid var(--pcs-border);
+      border-radius: 5px; padding: .35rem .5rem;
+      word-break: break-all; cursor: pointer;
+      transition: background .15s;
+    }
+    .face-key-box:hover { background: rgba(14,165,233,.08); }
+    .face-key-copied { color: var(--pcs-green) !important; }
+
+    .modal-summary { margin-top: 1rem; padding: .75rem 1rem; background: var(--pcs-bg); border: 1px solid var(--pcs-border); border-radius: var(--pcs-radius-sm); }
+    .modal-summary p { margin: 0; font-size: .8rem; color: var(--pcs-text-dim); }
+
+    .modal-footer { margin-top: 1.25rem; display: flex; gap: .75rem; flex-wrap: wrap; justify-content: flex-end; }
+
+    /* ── Toast / notification ─────────────────────────────────────────────── */
+    #toast-stack {
+      position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 3000;
+      display: flex; flex-direction: column-reverse; gap: .5rem;
+      pointer-events: none;
+    }
+    .pcs-toast {
+      padding: .65rem 1rem; border-radius: var(--pcs-radius-sm);
+      font-size: .83rem; font-weight: 600;
+      background: var(--pcs-surface-2); border: 1px solid var(--pcs-border);
+      color: var(--pcs-text); box-shadow: var(--pcs-shadow);
+      max-width: 320px; pointer-events: auto;
+      animation: slideUp .2s ease forwards;
+    }
+    .pcs-toast.success { border-color: rgba(34,197,94,.4); color: var(--pcs-green); }
+    .pcs-toast.error   { border-color: rgba(239,68,68,.4); color: var(--pcs-red); }
+    .pcs-toast.info    { border-color: rgba(14,165,233,.4); color: var(--pcs-accent); }
+    @keyframes slideUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:none} }
+
+    /* ── Stats bar ───────────────────────────────────────────────────────── */
+    .enroll-stat-bar {
+      background: var(--pcs-surface-2);
+      border: 1px solid var(--pcs-border);
+      border-radius: var(--pcs-radius-sm);
+      padding: .65rem 1.25rem;
+      display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap;
+    }
+    .enroll-stat { display: flex; flex-direction: column; }
+    .enroll-stat .label { font-size: .65rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--pcs-muted); }
+    .enroll-stat .value { font-size: 1.15rem; font-weight: 700; font-family: var(--pcs-mono); color: var(--pcs-text); }
+
+    /* ── No cameras placeholder ───────────────────────────────────────────── */
+    .no-cameras {
+      text-align: center; padding: 3.5rem 2rem;
+      color: var(--pcs-muted);
+      border: 2px dashed var(--pcs-border);
+      border-radius: var(--pcs-radius);
+    }
+    .no-cameras i { font-size: 3rem; display: block; margin-bottom: .75rem; opacity: .5; }
+  </style>
+</head>
+
+<body>
+
+<!-- ── Topbar ─────────────────────────────────────────────────────────────── -->
+<nav class="pcs-topbar">
+  <a class="brand" href="/">
+    <i class="bi bi-shield-lock-fill"></i>Privacy Campus Security
+  </a>
+  <span class="pill">Enroll</span>
+  <a href="/" style="font-size:.82rem;color:var(--pcs-muted);text-decoration:none;margin-left:.25rem;">
+    <i class="bi bi-arrow-left-short"></i> Dashboard
+  </a>
+  <span style="margin-left:auto;display:flex;align-items:center;gap:.75rem;">
+    <span class="ws-badge disconnected" id="ws-badge">● offline</span>
+    <span style="font-size:.8rem;color:var(--pcs-muted);" id="enrolled-count">
+      {{ total_enrolled }} enrolled
+    </span>
+  </span>
+</nav>
+
+<!-- ── Main content ───────────────────────────────────────────────────────── -->
+<div class="pcs-wrapper">
+
+  <!-- Stats bar -->
+  <div class="enroll-stat-bar mb-4">
+    <div class="enroll-stat">
+      <span class="label"><i class="bi bi-camera-video me-1"></i>Cameras</span>
+      <span class="value" id="cam-count">{{ cameras | length }}</span>
+    </div>
+    <div class="enroll-stat">
+      <span class="label"><i class="bi bi-person-check me-1"></i>Enrolled</span>
+      <span class="value" id="stat-total-enrolled">{{ total_enrolled }}</span>
+    </div>
+    <div class="enroll-stat">
+      <span class="label"><i class="bi bi-record-circle me-1"></i>Armed camera</span>
+      <span class="value font-mono" id="stat-armed" style="font-size:.95rem;color:var(--pcs-amber);">—</span>
+    </div>
+    <div class="enroll-stat">
+      <span class="label"><i class="bi bi-person-plus me-1"></i>This session</span>
+      <span class="value" id="stat-session-count">0</span>
+    </div>
+    <div style="margin-left:auto;">
+      <label class="pcs-label mb-1">Group ID</label>
+      <input id="group-id-global" class="pcs-input mono" style="width:180px;"
+             placeholder="e.g. SHIFT-A" value="default" autocomplete="off"/>
+    </div>
+  </div>
+
+  <!-- Camera grid -->
+  <div class="section-label"><i class="bi bi-camera-video-fill"></i>Campus Cameras</div>
+
+  {% if cameras %}
+  <div class="row row-cols-1 row-cols-sm-2 row-cols-lg-3 row-cols-xl-4 g-3 mb-4" id="camera-grid">
+    {% for cam in cameras %}
+    <div class="col">
+      <div class="cam-card" id="card-{{ cam.camera_id }}" data-camera-id="{{ cam.camera_id }}">
+
+        <!-- Thumbnail -->
+        <div class="cam-thumb">
+          <i class="bi bi-camera-video cam-thumb-icon" id="thumb-icon-{{ cam.camera_id }}"></i>
+          <span class="cam-thumb-badge {{ 'active' if cam.active else 'inactive' }}"
+                id="status-badge-{{ cam.camera_id }}">
+            {{ '● active' if cam.active else '○ inactive' }}
+          </span>
+          <span class="cam-thumb-snap" id="snap-badge-{{ cam.camera_id }}">● capturing</span>
+        </div>
+
+        <!-- Body -->
+        <div class="cam-body">
+          <div class="cam-name">{{ cam.name }}</div>
+          <div class="cam-id">{{ cam.camera_id }}</div>
+          <div class="cam-meta">
+            {% if cam.door_id %}
+            <span><i class="bi bi-door-open" style="color:var(--pcs-accent)"></i>{{ cam.door_id }}</span>
+            {% endif %}
+            {% if cam.lat and cam.lon %}
+            <span><i class="bi bi-geo-alt" style="color:var(--pcs-muted)"></i>{{ "%.4f"|format(cam.lat) }}, {{ "%.4f"|format(cam.lon) }}</span>
+            {% endif %}
+          </div>
+          <div class="mt-auto">
+            <div style="font-size:.7rem;color:var(--pcs-muted);font-family:var(--pcs-mono);margin-top:.3rem;">
+              <i class="bi bi-broadcast"></i> campus/{{ cam.camera_id }}/frame
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="cam-footer">
+          <button class="pcs-btn pcs-btn-enroll flex-fill btn-arm"
+                  data-camera-id="{{ cam.camera_id }}"
+                  id="btn-enroll-{{ cam.camera_id }}"
+                  {% if not cam.active %}disabled title="Camera inactive"{% endif %}>
+            <i class="bi bi-person-plus-fill"></i> Enroll
+          </button>
+          <button class="pcs-btn pcs-btn-cancel flex-fill btn-disarm"
+                  data-camera-id="{{ cam.camera_id }}"
+                  id="btn-cancel-{{ cam.camera_id }}"
+                  style="display:none;">
+            <i class="bi bi-x-circle"></i> Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="no-cameras mb-4">
+    <i class="bi bi-camera-video-off"></i>
+    No cameras configured.<br>
+    <small>Add entries to <code>configs/cameras.yaml</code> and restart the server.</small>
+  </div>
+  {% endif %}
+
+  <!-- Capture panel (shown when a camera is armed) -->
+  <div id="capture-panel" class="hidden mb-4">
+    <div class="capture-header">
+      <div class="capture-title">
+        <i class="bi bi-record-circle-fill" style="color:var(--pcs-amber);"></i>
+        Capture &nbsp;—&nbsp;
+        <span class="capture-cam-id" id="panel-cam-name">—</span>
+      </div>
+      <div style="display:flex;gap:.5rem;align-items:center;">
+        <span class="fps-counter" id="fps-label">— fps</span>
+        <button class="pcs-btn pcs-btn-danger" id="btn-panel-cancel" style="padding:.35rem .85rem;font-size:.78rem;">
+          <i class="bi bi-x-circle"></i> Cancel
+        </button>
+      </div>
+    </div>
+
+    <div class="capture-body">
+      <!-- Live webcam feed -->
+      <div class="capture-video-wrap">
+        <video id="capture-video" autoplay playsinline muted></video>
+        <canvas id="capture-canvas"></canvas>
+        <div class="capture-video-overlay idle" id="capture-overlay">Waiting for webcam…</div>
+      </div>
+
+      <!-- Controls -->
+      <div class="capture-controls">
+        <div>
+          <label class="pcs-label" for="panel-group-id"><i class="bi bi-collection me-1"></i>Group ID</label>
+          <input id="panel-group-id" class="pcs-input mono" placeholder="SHIFT-A" autocomplete="off"/>
+          <div style="font-size:.72rem;color:var(--pcs-muted);margin-top:.3rem;">
+            Embedded in every generated subject key.
+          </div>
+        </div>
+
+        <div>
+          <label class="pcs-label"><i class="bi bi-info-circle me-1"></i>Status</label>
+          <div class="capture-status" id="capture-status">Webcam starting…</div>
+        </div>
+
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+          <button class="pcs-btn pcs-btn-success" id="btn-snap-manual" style="flex:1;">
+            <i class="bi bi-camera-fill"></i> Capture now
+          </button>
+        </div>
+
+        <div style="font-size:.75rem;color:var(--pcs-muted);">
+          <i class="bi bi-info-circle me-1"></i>
+          Frames are sent automatically at ~2 fps.  Click <strong>Capture now</strong>
+          for an immediate single-frame send.  Enrollment triggers as soon as a
+          face is detected.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Keys log (collapsible) -->
+  <div class="section-label"><i class="bi bi-key-fill"></i>Session Key Log</div>
+  <div class="pcs-card" id="key-log-card"
+       style="background:var(--pcs-surface);border:1px solid var(--pcs-border);border-radius:var(--pcs-radius);padding:1rem 1.25rem;min-height:60px;">
+    <div style="font-size:.8rem;color:var(--pcs-muted);font-style:italic;" id="key-log-empty">
+      No enrollments yet this session.
+    </div>
+    <div id="key-log-body" style="display:none;">
+      <table style="width:100%;font-size:.78rem;border-collapse:collapse;" id="key-log-table">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:.35rem .5rem;color:var(--pcs-muted);font-size:.67rem;text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--pcs-border);">Camera</th>
+            <th style="text-align:left;padding:.35rem .5rem;color:var(--pcs-muted);font-size:.67rem;text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--pcs-border);">Group</th>
+            <th style="text-align:left;padding:.35rem .5rem;color:var(--pcs-muted);font-size:.67rem;text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--pcs-border);">Face</th>
+            <th style="text-align:left;padding:.35rem .5rem;color:var(--pcs-muted);font-size:.67rem;text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--pcs-border);">Display name</th>
+            <th style="text-align:left;padding:.35rem .5rem;color:var(--pcs-muted);font-size:.67rem;text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid var(--pcs-border);">Subject key (opaque)</th>
+            <th style="padding:.35rem .5rem;border-bottom:1px solid var(--pcs-border);"></th>
+          </tr>
+        </thead>
+        <tbody id="key-log-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /pcs-wrapper -->
+
+<!-- ════════════════════════════════════════════════════════════════════════════
+     ENROLL RESULT MODAL
+     ════════════════════════════════════════════════════════════════════════════ -->
+<div class="pcs-modal-backdrop hidden" id="enroll-modal">
+  <div class="pcs-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+
+    <div class="modal-header">
+      <div class="modal-title" id="modal-title">
+        <i class="bi bi-person-check-fill" style="color:var(--pcs-green);"></i>
+        Enrollment Complete
+      </div>
+      <button class="modal-close" id="modal-close-btn" aria-label="Close">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </div>
+
+    <!-- Summary line -->
+    <div style="font-size:.83rem;color:var(--pcs-text-dim);margin-bottom:1rem;" id="modal-summary-line"></div>
+
+    <!-- Face crop grid + per-face metadata -->
+    <div class="face-result-grid" id="modal-face-grid"></div>
+
+    <!-- Info box -->
+    <div class="modal-summary mt-3">
+      <p><i class="bi bi-shield-lock-fill me-1" style="color:var(--pcs-accent);"></i>
+        <strong>Privacy note:</strong> Only the SHA-256 hash of each subject key is stored.
+        The plaintext keys above are shown <em>once</em> — retain them if you need to perform future <code>verify</code> calls.
+      </p>
+    </div>
+
+    <div class="modal-footer">
+      <button class="pcs-btn pcs-btn-secondary" id="modal-copy-all-btn">
+        <i class="bi bi-clipboard"></i> Copy all keys
+      </button>
+      <button class="pcs-btn pcs-btn-enroll" id="modal-confirm-btn">
+        <i class="bi bi-check-lg"></i> Done
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast container ─────────────────────────────────────────────────────── -->
+<div id="toast-stack"></div>
+
+<!-- ── Scripts ─────────────────────────────────────────────────────────────── -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-YvpcrYf0tY3lHB60NNkmXc4s9bIOgUxi8T/jzmr3v7qSRPm91I1i3+9m6I63DLEF"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"
+        crossorigin="anonymous"></script>
+
+<script>
+'use strict';
+
+/* ════════════════════════════════════════════════════════════════════════════
+   UTILITY
+   ════════════════════════════════════════════════════════════════════════════ */
+const $ = id => document.getElementById(id);
+
+function toast(msg, type = 'info', ttl = 3500) {
+  const el = document.createElement('div');
+  el.className = `pcs-toast ${type}`;
+  el.textContent = msg;
+  $('toast-stack').appendChild(el);
+  setTimeout(() => el.remove(), ttl);
+}
+
+function setTxt(id, val) {
+  const el = $(id);
+  if (el) el.textContent = val;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   STATE
+   ════════════════════════════════════════════════════════════════════════════ */
+let _armedCamera  = null;   // camera_id currently armed (or null)
+let _stream       = null;   // MediaStream
+let _sendTimer    = null;   // setInterval id for frame sending
+let _frameCount   = 0;
+let _fpsTimer     = null;
+let _sessionCount = 0;      // faces enrolled this session
+let _sendLock     = false;  // prevents overlapping send calls
+
+const SEND_INTERVAL_MS = 500;   // ~2 fps
+const CAPTURE_W        = 640;
+const CAPTURE_H        = 480;
+
+/* ════════════════════════════════════════════════════════════════════════════
+   SOCKET.IO
+   ════════════════════════════════════════════════════════════════════════════ */
+const socket = io({ transports: ['websocket', 'polling'] });
+
+socket.on('connect', () => {
+  $('ws-badge').textContent  = '● live';
+  $('ws-badge').className    = 'ws-badge connected';
+  toast('Socket connected', 'success', 2000);
+});
+
+socket.on('disconnect', () => {
+  $('ws-badge').textContent  = '● offline';
+  $('ws-badge').className    = 'ws-badge disconnected';
+});
+
+/* arm_ack ─── server confirms arm or disarm */
+socket.on('arm_ack', ({ camera_id, armed }) => {
+  if (armed) {
+    _armedCamera = camera_id;
+    setTxt('stat-armed', camera_id);
+    showCapturePanel(camera_id);
+    startWebcam();
+    toast(`Camera ${camera_id} armed — point it at the subject`, 'info');
+  } else {
+    _armedCamera = null;
+    setTxt('stat-armed', '—');
+    hideCapturePanel();
+    stopWebcam();
+  }
+});
+
+/* camera_status ─── broadcast: update card badge on ALL connected tabs */
+socket.on('camera_status', ({ camera_id, armed }) => {
+  const card    = document.getElementById(`card-${camera_id}`);
+  const badge   = document.getElementById(`status-badge-${camera_id}`);
+  const snap    = document.getElementById(`snap-badge-${camera_id}`);
+  const btnArm  = document.getElementById(`btn-enroll-${camera_id}`);
+  const btnCxl  = document.getElementById(`btn-cancel-${camera_id}`);
+
+  if (!card) return;
+
+  if (armed) {
+    card.classList.add('armed');
+    if (badge) { badge.textContent = '● armed'; badge.className = 'cam-thumb-badge armed'; }
+    if (snap)  snap.classList.add('visible');
+    if (btnArm) btnArm.style.display  = 'none';
+    if (btnCxl) btnCxl.style.display  = '';
+  } else {
+    card.classList.remove('armed');
+    if (snap)  snap.classList.remove('visible');
+    // Restore original active/inactive badge text
+    if (badge) {
+      const isActive = btnArm && !btnArm.disabled;
+      badge.textContent = isActive ? '● active' : '○ inactive';
+      badge.className   = 'cam-thumb-badge ' + (isActive ? 'active' : 'inactive');
+    }
+    if (btnArm) btnArm.style.display  = '';
+    if (btnCxl) btnCxl.style.display  = 'none';
+  }
+});
+
+/* enroll_result ─── server has processed a frame */
+socket.on('enroll_result', (data) => {
+  _sendLock = false;   // allow sends to resume if needed
+
+  if (data.status === 'not_armed') {
+    toast('Camera no longer armed — click Enroll again', 'error');
+    hideCapturePanel();
+    return;
+  }
+
+  if (data.status === 'no_face') {
+    setOverlay('noface', '⚠ No face detected — keep trying…');
+    setStatus('No face detected — move closer or adjust lighting.');
+    return;
+  }
+
+  if (data.status === 'enrolled') {
+    // Stop sending frames — enrollment done
+    stopSending();
+    stopWebcam();
+    hideCapturePanel();
+
+    _sessionCount += data.n_enrolled;
+    setTxt('stat-session-count', _sessionCount);
+    setTxt('stat-total-enrolled', data.total_enrolled);
+    setTxt('enrolled-count', `${data.total_enrolled} enrolled`);
+
+    openModal(data);
+    appendKeyLog(data);
+    toast(`✓ ${data.n_enrolled} face(s) enrolled from ${data.camera_id}`, 'success', 5000);
+    return;
+  }
+
+  if (data.status === 'error') {
+    toast(`Error: ${data.message}`, 'error');
+  }
+});
+
+socket.on('error', ({ message }) => {
+  toast(`Server error: ${message}`, 'error');
+});
+
+/* ════════════════════════════════════════════════════════════════════════════
+   CAMERA GRID — Arm / disarm buttons
+   ════════════════════════════════════════════════════════════════════════════ */
+document.querySelectorAll('.btn-arm').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const cid = btn.dataset.cameraId;
+    // Sync the global group-id to the panel
+    $('panel-group-id').value = $('group-id-global').value || 'default';
+    socket.emit('arm_enroll', { camera_id: cid });
+  });
+});
+
+document.querySelectorAll('.btn-disarm').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const cid = btn.dataset.cameraId;
+    socket.emit('disarm_enroll', { camera_id: cid });
+    hideCapturePanel();
+    stopWebcam();
+    _armedCamera = null;
+    setTxt('stat-armed', '—');
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════
+   CAPTURE PANEL
+   ════════════════════════════════════════════════════════════════════════════ */
+function showCapturePanel(cameraId) {
+  $('capture-panel').classList.remove('hidden');
+  $('panel-cam-name').textContent = cameraId;
+  // scroll to panel
+  $('capture-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function hideCapturePanel() {
+  $('capture-panel').classList.add('hidden');
+}
+
+async function startWebcam() {
+  try {
+    _stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: CAPTURE_W }, height: { ideal: CAPTURE_H }, facingMode: 'user' },
+      audio: false,
+    });
+    const vid = $('capture-video');
+    vid.srcObject = _stream;
+    await new Promise(res => { vid.onloadedmetadata = res; });
+    setOverlay('armed', '● Armed — detecting faces…');
+    setStatus('Webcam active — sending frames…');
+    startSending();
+  } catch (err) {
+    setOverlay('noface', 'Webcam error: ' + err.message);
+    setStatus('Could not access webcam: ' + err.message);
+    toast('Webcam error: ' + err.message, 'error');
+  }
+}
+
+function stopWebcam() {
+  stopSending();
+  if (_stream) {
+    _stream.getTracks().forEach(t => t.stop());
+    _stream = null;
+  }
+  const vid = $('capture-video');
+  if (vid) vid.srcObject = null;
+  setOverlay('idle', 'Idle');
+  $('fps-label').textContent = '— fps';
+}
+
+/* ── Frame sending loop ─────────────────────────────────────────────────── */
+function startSending() {
+  stopSending();
+  _frameCount = 0;
+  _fpsTimer   = setInterval(() => {
+    $('fps-label').textContent = _frameCount + ' fps';
+    _frameCount = 0;
+  }, 1000);
+  _sendTimer = setInterval(sendFrame, SEND_INTERVAL_MS);
+}
+
+function stopSending() {
+  if (_sendTimer)  { clearInterval(_sendTimer);  _sendTimer = null; }
+  if (_fpsTimer)   { clearInterval(_fpsTimer);   _fpsTimer  = null; }
+}
+
+function sendFrame() {
+  // Skip if we're still waiting for the last result, or not streaming
+  if (_sendLock || !_armedCamera || !_stream) return;
+
+  const vid = $('capture-video');
+  const cvs = $('capture-canvas');
+  if (!vid || !cvs || vid.readyState < 2) return;
+
+  cvs.width  = vid.videoWidth  || CAPTURE_W;
+  cvs.height = vid.videoHeight || CAPTURE_H;
+  const ctx  = cvs.getContext('2d');
+  ctx.drawImage(vid, 0, 0, cvs.width, cvs.height);
+  const b64  = cvs.toDataURL('image/jpeg', 0.82);
+
+  const groupId = ($('panel-group-id').value || $('group-id-global').value || 'default').trim();
+
+  _sendLock = true;   // hold until enroll_result arrives
+  socket.emit('enroll_frame', {
+    camera_id: _armedCamera,
+    image_b64: b64,
+    group_id:  groupId,
+  });
+  _frameCount++;
+  setOverlay('armed', '● Sending frame…');
+}
+
+/* Manual capture button */
+$('btn-snap-manual').addEventListener('click', () => {
+  _sendLock = false;
+  sendFrame();
+  toast('Manual capture sent', 'info', 1500);
+});
+
+/* Cancel button in panel */
+$('btn-panel-cancel').addEventListener('click', () => {
+  if (_armedCamera) {
+    socket.emit('disarm_enroll', { camera_id: _armedCamera });
+  }
+  _armedCamera = null;
+  setTxt('stat-armed', '—');
+  hideCapturePanel();
+  stopWebcam();
+});
+
+/* ── Overlay / status helpers ───────────────────────────────────────────── */
+function setOverlay(cls, text) {
+  const el = $('capture-overlay');
+  if (!el) return;
+  el.className = `capture-video-overlay ${cls}`;
+  el.textContent = text;
+}
+function setStatus(text) {
+  const el = $('capture-status');
+  if (el) el.textContent = text;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   ENROLL RESULT MODAL
+   ════════════════════════════════════════════════════════════════════════════ */
+let _lastResult = null;
+
+function openModal(data) {
+  _lastResult = data;
+
+  $('modal-summary-line').textContent =
+    `${data.n_enrolled} face(s) enrolled from camera "${data.camera_id}" ` +
+    `(group: ${data.group_id}) · ${new Date(data.timestamp).toLocaleTimeString()}`;
+
+  const grid = $('modal-face-grid');
+  grid.innerHTML = '';
+
+  data.faces.forEach((face, idx) => {
+    const card = document.createElement('div');
+    card.className = 'face-result-card';
+
+    // Face crop image
+    if (face.crop_b64) {
+      const img   = document.createElement('img');
+      img.src      = face.crop_b64;
+      img.className = 'face-crop';
+      img.alt       = `Face ${face.face_id}`;
+      card.appendChild(img);
+    } else {
+      const ph = document.createElement('div');
+      ph.className = 'face-crop-placeholder';
+      ph.innerHTML = '<i class="bi bi-person-bounding-box"></i>';
+      card.appendChild(ph);
+    }
+
+    // Metadata area
+    const meta = document.createElement('div');
+    meta.className = 'face-meta';
+
+    // Face index label
+    const lbl = document.createElement('div');
+    lbl.className = 'face-index';
+    lbl.textContent = `Face ${idx + 1}`;
+    meta.appendChild(lbl);
+
+    // Editable display name
+    const nameLabel = document.createElement('label');
+    nameLabel.className = 'pcs-label';
+    nameLabel.textContent = 'Display name (optional)';
+    const nameInput = document.createElement('input');
+    nameInput.className = 'pcs-input';
+    nameInput.placeholder = 'e.g. John D. / Employee 42';
+    nameInput.dataset.faceId = face.face_id;
+    nameInput.dataset.key    = face.key;
+    meta.appendChild(nameLabel);
+    meta.appendChild(nameInput);
+
+    // Opaque key (clicking copies)
+    const keyBox = document.createElement('div');
+    keyBox.className = 'face-key-box';
+    keyBox.title     = 'Click to copy';
+    keyBox.textContent = face.key;
+    keyBox.addEventListener('click', () => {
+      navigator.clipboard.writeText(face.key).then(() => {
+        keyBox.classList.add('face-key-copied');
+        keyBox.textContent = '✓ Copied!';
+        setTimeout(() => {
+          keyBox.classList.remove('face-key-copied');
+          keyBox.textContent = face.key;
+        }, 1800);
+      });
+    });
+    meta.appendChild(keyBox);
+
+    card.appendChild(meta);
+    grid.appendChild(card);
+  });
+
+  $('enroll-modal').classList.remove('hidden');
+}
+
+function closeModal() {
+  $('enroll-modal').classList.add('hidden');
+}
+
+$('modal-close-btn').addEventListener('click', closeModal);
+$('modal-confirm-btn').addEventListener('click', closeModal);
+
+// Copy all keys
+$('modal-copy-all-btn').addEventListener('click', () => {
+  if (!_lastResult) return;
+  const keys = _lastResult.faces.map(f => f.key).join('\n');
+  navigator.clipboard.writeText(keys).then(() => {
+    toast('All keys copied to clipboard', 'success', 2000);
+  });
+});
+
+// Close on backdrop click
+$('enroll-modal').addEventListener('click', (e) => {
+  if (e.target === $('enroll-modal')) closeModal();
+});
+
+// Close on Escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeModal();
+});
+
+/* ════════════════════════════════════════════════════════════════════════════
+   SESSION KEY LOG
+   ════════════════════════════════════════════════════════════════════════════ */
+function appendKeyLog(data) {
+  $('key-log-empty').style.display = 'none';
+  $('key-log-body').style.display  = '';
+
+  const tbody = $('key-log-tbody');
+  const ts     = new Date(data.timestamp).toLocaleTimeString();
+
+  data.faces.forEach((face, idx) => {
+    const tr        = document.createElement('tr');
+    tr.style.borderBottom = '1px solid rgba(30,48,72,.5)';
+
+    const nameInputId = `log-name-${face.face_id}-${Date.now()}`;
+
+    tr.innerHTML = `
+      <td style="padding:.45rem .5rem;color:var(--pcs-accent);font-family:var(--pcs-mono);font-size:.75rem;">${data.camera_id}</td>
+      <td style="padding:.45rem .5rem;color:var(--pcs-text-dim);font-size:.75rem;">${data.group_id}</td>
+      <td style="padding:.45rem .5rem;font-family:var(--pcs-mono);font-size:.75rem;">${face.face_id}</td>
+      <td style="padding:.45rem .5rem;min-width:120px;">
+        <input id="${nameInputId}" class="pcs-input" style="padding:.25rem .5rem;font-size:.75rem;"
+               placeholder="—" autocomplete="off"/>
+      </td>
+      <td style="padding:.45rem .5rem;font-family:var(--pcs-mono);font-size:.68rem;color:var(--pcs-accent);
+                 max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+          title="${face.key}">${face.key}</td>
+      <td style="padding:.45rem .5rem;white-space:nowrap;">
+        <button class="pcs-btn pcs-btn-secondary" style="padding:.2rem .6rem;font-size:.72rem;"
+                onclick="navigator.clipboard.writeText('${face.key}').then(()=>this.textContent='✓').catch(()=>{})">
+          <i class="bi bi-clipboard"></i>
+        </button>
+      </td>
+    `;
+    tbody.prepend(tr);
+  });
+}
+</script>
+</body>
+</html>
